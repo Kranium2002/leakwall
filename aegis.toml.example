@@ -1,0 +1,27 @@
+tests/fixtures/sample_env/.env# Aegis configuration file
+# Place at ./aegis.toml (project-level) or ~/.aegis/config.toml (global)
+
+# Proxy port for `aegis run`
+proxy_port = 9090
+
+# Scan mode: "WarnOnly", "Redact", or "Block"
+mode = "WarnOnly"
+
+# Log directory
+# log_dir = "~/.aegis/logs"
+
+[mcp_scan]
+# Enable MCP server scanning in `aegis scan`
+enabled = true
+# Connect timeout for MCP servers (seconds)
+connect_timeout_secs = 10
+
+[registry]
+# Enable external registry lookups
+enabled = true
+# AgentAudit API base URL
+agentaudit_url = "https://api.agentaudit.dev/v1"
+# MCP Trust API base URL
+mcp_trust_url = "https://api.mcp-trust.com/v1"
+# Cache TTL for registry results (hours)
+cache_ttl_hours = 24

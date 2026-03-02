@@ -1,0 +1,42 @@
+[
+  {
+    "id": "CVE-2025-68145",
+    "cvss": 9.8,
+    "affected_package": "mcp-server-git",
+    "affected_versions": "<1.2.1",
+    "fixed_version": "1.2.1",
+    "description": "Remote code execution via crafted git operations in Anthropic mcp-server-git"
+  },
+  {
+    "id": "CVE-2025-68143",
+    "cvss": 8.1,
+    "affected_package": "mcp-server-git",
+    "affected_versions": "<1.2.1",
+    "fixed_version": "1.2.1",
+    "description": "Arbitrary file read via path traversal in mcp-server-git"
+  },
+  {
+    "id": "CVE-2025-68144",
+    "cvss": 7.5,
+    "affected_package": "mcp-server-git",
+    "affected_versions": "<1.2.1",
+    "fixed_version": "1.2.1",
+    "description": "Server-side request forgery in mcp-server-git clone operations"
+  },
+  {
+    "id": "CVE-2025-59536",
+    "cvss": 7.8,
+    "affected_package": "claude-code",
+    "affected_versions": "<1.0.17",
+    "fixed_version": "1.0.17",
+    "description": "Prompt injection via malicious CLAUDE.md files allowing sandbox escape"
+  },
+  {
+    "id": "CVE-2026-21852",
+    "cvss": 8.5,
+    "affected_package": "claude-code",
+    "affected_versions": "<1.0.20",
+    "fixed_version": "1.0.20",
+    "description": "Secret exfiltration via .env file access bypass in Claude Code"
+  }
+]

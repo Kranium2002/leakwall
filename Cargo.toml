@@ -1,0 +1,77 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/youruser/aegis"
+
+[workspace.dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# HTTP proxy
+hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1", "http2"] }
+http-body-util = "0.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rcgen = "0.13"
+rustls-pemfile = "2"
+
+# Secret scanning
+aho-corasick = "1"
+regex = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots", "stream"], default-features = false }
+futures-util = "0.3"
+tokio-stream = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+dirs = "5"
+bytes = "1"
+dashmap = "6"
+anyhow = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+time = "0.3"
+base64 = "0.22"
+urlencoding = "2"
+hex = "0.4"
+colored = "2"
+
+# Testing
+assert_cmd = "2"
+wiremock = "0.6"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

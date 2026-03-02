@@ -1,0 +1,102 @@
+[[patterns]]
+name = "aws_access_key"
+regex = "AKIA[0-9A-Z]{16}"
+severity = "critical"
+description = "AWS Access Key ID"
+
+[[patterns]]
+name = "aws_secret_key"
+regex = "[0-9a-zA-Z/+]{40}"
+severity = "critical"
+context_regex = "(?i)(aws|secret|access).*[0-9a-zA-Z/+]{40}"
+description = "AWS Secret Access Key (requires context)"
+
+[[patterns]]
+name = "github_pat"
+regex = "ghp_[a-zA-Z0-9]{36}"
+severity = "critical"
+description = "GitHub Personal Access Token"
+
+[[patterns]]
+name = "github_oauth"
+regex = "gho_[a-zA-Z0-9]{36}"
+severity = "critical"
+description = "GitHub OAuth Token"
+
+[[patterns]]
+name = "github_fine_grained"
+regex = "github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}"
+severity = "critical"
+description = "GitHub Fine-Grained PAT"
+
+[[patterns]]
+name = "stripe_live"
+regex = "sk_live_[a-zA-Z0-9]{24,}"
+severity = "critical"
+description = "Stripe Live Secret Key"
+
+[[patterns]]
+name = "stripe_test"
+regex = "sk_test_[a-zA-Z0-9]{24,}"
+severity = "medium"
+description = "Stripe Test Secret Key"
+
+[[patterns]]
+name = "slack_bot_token"
+regex = "xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}"
+severity = "critical"
+description = "Slack Bot Token"
+
+[[patterns]]
+name = "slack_user_token"
+regex = "xoxp-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,}"
+severity = "critical"
+description = "Slack User Token"
+
+[[patterns]]
+name = "npm_token"
+regex = "npm_[a-zA-Z0-9]{36}"
+severity = "high"
+description = "npm Access Token"
+
+[[patterns]]
+name = "openai_api_key"
+regex = "sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}"
+severity = "critical"
+description = "OpenAI API Key"
+
+[[patterns]]
+name = "anthropic_api_key"
+regex = "sk-ant-[a-zA-Z0-9\\-]{90,}"
+severity = "critical"
+description = "Anthropic API Key"
+
+[[patterns]]
+name = "google_api_key"
+regex = "AIza[0-9A-Za-z_-]{35}"
+severity = "high"
+description = "Google API Key"
+
+[[patterns]]
+name = "jwt_token"
+regex = "eyJ[a-zA-Z0-9_-]{10,}\\.eyJ[a-zA-Z0-9_-]{10,}\\.[a-zA-Z0-9_-]{10,}"
+severity = "high"
+description = "JWT Token"
+
+[[patterns]]
+name = "private_key"
+regex = "-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+severity = "critical"
+description = "Private Key (PEM format)"
+
+[[patterns]]
+name = "database_url"
+regex = "(?:postgres|mysql|mongodb)://[^:]+:[^@]+@[^/]+"
+severity = "critical"
+description = "Database Connection URL with credentials"
+
+[[patterns]]
+name = "generic_bearer"
+regex = "Bearer [a-zA-Z0-9_-]{20,}"
+severity = "medium"
+description = "Bearer Token"
