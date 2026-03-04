@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ToolHash {
@@ -24,10 +24,17 @@ struct HashStore {
 pub fn check_hash_pins(identity: &ServerIdentity, tools: &[ToolDefinition]) -> Vec<HashChange> {
     let stored = load_stored_hashes();
     let mut changes = Vec::new();
+    let prefix = format!("{}:", identity.name);
 
     for tool in tools {
-        let current_hash = sha256_tool(tool);
-        let key = format!("{}:{}", identity.name, tool.name);
+        let current_hash = match sha256_tool(tool) {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(tool = %tool.name, error = %e, "skipping tool: hash computation failed");
+                continue;
+            }
+        };
+        let key = format!("{prefix}{}", tool.name);
 
         match stored.hashes.get(&key) {
             Some(stored_hash) if stored_hash.hash != current_hash => {
@@ -52,6 +59,23 @@ pub fn check_hash_pins(identity: &ServerIdentity, tools: &[ToolDefinition]) -> V
         }
     }
 
+    // Detect removed tools: stored hashes for this server that have no matching current tool
+    let current_tool_names: std::collections::HashSet<&str> =
+        tools.iter().map(|t| t.name.as_str()).collect();
+    for (key, stored_hash) in &stored.hashes {
+        if let Some(tool_name) = key.strip_prefix(&prefix) {
+            if !current_tool_names.contains(tool_name) {
+                changes.push(HashChange {
+                    tool_name: tool_name.to_string(),
+                    change_type: HashChangeType::Removed,
+                    previous_hash: Some(stored_hash.hash.clone()),
+                    current_hash: String::new(),
+                    first_seen: Some(stored_hash.first_seen),
+                });
+            }
+        }
+    }
+
     // Update stored hashes
     save_hashes(identity, tools);
 
@@ -64,11 +88,12 @@ pub fn check_hash_pins(identity: &ServerIdentity, tools: &[ToolDefinition]) -> V
 }
 
 /// Compute SHA-256 hash of a tool's full JSON definition.
-fn sha256_tool(tool: &ToolDefinition) -> String {
-    let json = serde_json::to_string(tool).unwrap_or_default();
+fn sha256_tool(tool: &ToolDefinition) -> Result<String, crate::McpError> {
+    let json = serde_json::to_string(tool)
+        .map_err(|e| crate::McpError::Serialization(format!("hash serialization: {e}")))?;
     let mut hasher = Sha256::new();
     hasher.update(json.as_bytes());
-    hex::encode(hasher.finalize())
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn hash_store_path() -> Option<std::path::PathBuf> {
@@ -76,14 +101,29 @@ fn hash_store_path() -> Option<std::path::PathBuf> {
 }
 
 fn load_stored_hashes() -> HashStore {
+    use std::io::Read;
+
     let path = match hash_store_path() {
         Some(p) => p,
         None => return HashStore::default(),
     };
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|c| serde_json::from_str(&c).ok())
-        .unwrap_or_default()
+
+    let mut file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(_) => return HashStore::default(),
+    };
+
+    if <std::fs::File as fs2::FileExt>::lock_shared(&file).is_err() {
+        return HashStore::default();
+    }
+
+    let mut contents = String::new();
+    if file.read_to_string(&mut contents).is_ok() {
+        serde_json::from_str(&contents).unwrap_or_default()
+    } else {
+        HashStore::default()
+    }
+    // Lock released when file dropped
 }
 
 fn save_hashes(identity: &ServerIdentity, tools: &[ToolDefinition]) {
@@ -123,10 +163,28 @@ fn save_hashes(identity: &ServerIdentity, tools: &[ToolDefinition]) {
     };
 
     let now = Utc::now();
+    let prefix = format!("{}:", identity.name);
+
+    // Remove stale entries for this server (tools that no longer exist)
+    let current_tool_names: std::collections::HashSet<&str> =
+        tools.iter().map(|t| t.name.as_str()).collect();
+    store.hashes.retain(|key, _| {
+        if let Some(tool_name) = key.strip_prefix(&prefix) {
+            current_tool_names.contains(tool_name)
+        } else {
+            true // Keep entries for other servers
+        }
+    });
 
     for tool in tools {
-        let key = format!("{}:{}", identity.name, tool.name);
-        let current_hash = sha256_tool(tool);
+        let key = format!("{prefix}{}", tool.name);
+        let current_hash = match sha256_tool(tool) {
+            Ok(h) => h,
+            Err(e) => {
+                warn!(tool = %tool.name, error = %e, "skipping tool: hash serialization failed");
+                continue;
+            }
+        };
 
         let entry = store.hashes.entry(key).or_insert_with(|| ToolHash {
             server_name: identity.name.clone(),

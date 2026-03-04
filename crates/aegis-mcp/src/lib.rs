@@ -1,5 +1,7 @@
 pub mod analyze;
+pub mod command_analysis;
 pub mod connect;
+pub mod cross_origin;
 pub mod cve;
 pub mod discover;
 pub mod hashpin;
@@ -144,6 +146,7 @@ pub enum FindingType {
     ToolPoisoning,
     UnicodeObfuscation,
     DangerousCapability,
+    DangerousCommand,
     ConfigMisconfiguration,
 }
 
@@ -158,57 +161,62 @@ pub struct Finding {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-    Critical,
+pub enum AgentAuditRecommendation {
+    Safe,
+    Caution,
+    Unsafe,
+    NotAudited,
 }
 
-impl std::fmt::Display for RiskLevel {
+impl std::fmt::Display for AgentAuditRecommendation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Low => write!(f, "Low"),
-            Self::Medium => write!(f, "Medium"),
-            Self::High => write!(f, "High"),
-            Self::Critical => write!(f, "Critical"),
+            Self::Safe => write!(f, "Safe"),
+            Self::Caution => write!(f, "Caution"),
+            Self::Unsafe => write!(f, "Unsafe"),
+            Self::NotAudited => write!(f, "Not Audited"),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SeverityBreakdown {
+    pub critical: u32,
+    pub high: u32,
+    pub medium: u32,
+    pub low: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryResults {
     pub agent_audit: Option<AgentAuditResult>,
-    pub mcp_trust: Option<McpTrustResult>,
     pub cves: Vec<KnownCve>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentAuditResult {
     pub trust_score: u8,
+    pub recommendation: AgentAuditRecommendation,
+    pub total_findings: u32,
+    pub severity_breakdown: SeverityBreakdown,
     pub findings: Vec<AuditFinding>,
-    pub asf_ids: Vec<String>,
+    pub audit_level: String,
+    pub last_audited: Option<String>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditFinding {
     pub id: String,
+    pub title: String,
     pub description: String,
     pub severity: Severity,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpTrustResult {
-    pub risk_level: RiskLevel,
-    pub vulnerabilities: Vec<VulnDetail>,
-    pub remediation: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VulnDetail {
-    pub id: String,
-    pub description: String,
-    pub severity: Severity,
+    pub confidence: String,
+    pub asf_id: Option<String>,
+    pub file_path: Option<String>,
+    pub line_number: Option<u32>,
+    pub remediation: Option<String>,
+    pub by_design: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +268,7 @@ pub struct McpAuditResult {
     pub identity: ServerIdentity,
     pub tools_count: usize,
     pub local_findings: Vec<Finding>,
+    pub command_findings: Vec<Finding>,
     pub registry: RegistryResults,
     pub hash_changes: Vec<HashChange>,
     pub verdict: Verdict,
@@ -293,23 +302,59 @@ pub struct PlaintextFinding {
 
 /// Run the full MCP audit pipeline for a single server.
 ///
-/// When `trust_project` is false, project-level MCP servers are not executed.
+/// Pre-execution static analysis determines whether the server command is safe to run.
+/// When `no_exec` is true, no servers are ever executed (static analysis only).
+/// When `trust_project` is true, all servers are executed regardless of analysis verdict.
+/// Global servers are always executed. Project servers are only executed if analysis says safe.
 pub async fn audit_mcp_server(
     server: &McpServerConfig,
     refresh: bool,
     trust_project: bool,
+    no_exec: bool,
 ) -> Result<McpAuditResult, McpError> {
     let identity = connect::extract_identity(server);
-    let tools = connect::connect_and_list_tools(server, trust_project).await?;
+
+    // Always run pre-execution static analysis
+    let cmd_result = command_analysis::analyze_command(server);
+    let command_findings = cmd_result.findings;
+    let cmd_verdict = cmd_result.verdict;
+
+    // Decide whether to execute the server
+    let is_global = matches!(server.source.scope, ConfigScope::Global);
+    let should_execute = if no_exec {
+        false
+    } else if trust_project || is_global {
+        true
+    } else {
+        matches!(
+            cmd_verdict,
+            command_analysis::CommandVerdict::Safe
+                | command_analysis::CommandVerdict::SafeWithAdvisory
+        )
+    };
+
+    let tools = if should_execute {
+        connect::connect_and_list_tools(server).await?
+    } else {
+        vec![]
+    };
+
     let local_findings = analyze::analyze_tools_locally(&tools);
     let registry = registry::query_registries(&identity, refresh).await;
-    let hash_changes = hashpin::check_hash_pins(&identity, &tools);
-    let verdict = compute_verdict(&local_findings, &registry, &hash_changes);
+    // Only check hash pins when we actually connected and retrieved tools;
+    // otherwise an empty tools list would falsely flag all stored tools as removed.
+    let hash_changes = if should_execute {
+        hashpin::check_hash_pins(&identity, &tools)
+    } else {
+        vec![]
+    };
+    let verdict = compute_verdict(&local_findings, &command_findings, &registry, &hash_changes);
 
     Ok(McpAuditResult {
         identity,
         tools_count: tools.len(),
         local_findings,
+        command_findings,
         registry,
         hash_changes,
         verdict,
@@ -319,15 +364,23 @@ pub async fn audit_mcp_server(
 /// Compute overall verdict from findings.
 fn compute_verdict(
     findings: &[Finding],
+    command_findings: &[Finding],
     registry: &RegistryResults,
     hash_changes: &[HashChange],
 ) -> Verdict {
-    let has_critical = findings.iter().any(|f| f.severity == Severity::Critical);
-    let has_poisoning = findings
+    let all_findings: Vec<&Finding> = findings.iter().chain(command_findings.iter()).collect();
+
+    let has_critical = all_findings
+        .iter()
+        .any(|f| f.severity == Severity::Critical);
+    let has_poisoning = all_findings
         .iter()
         .any(|f| f.finding_type == FindingType::ToolPoisoning);
+    let has_dangerous_cmd = all_findings.iter().any(|f| {
+        f.finding_type == FindingType::DangerousCommand && f.severity == Severity::Critical
+    });
 
-    if has_poisoning {
+    if has_poisoning || has_dangerous_cmd {
         return Verdict::Unsafe;
     }
 
@@ -337,12 +390,7 @@ fn compute_verdict(
 
     // Check registry for high risk
     if let Some(ref aa) = registry.agent_audit {
-        if aa.trust_score < 40 {
-            return Verdict::Unsafe;
-        }
-    }
-    if let Some(ref mt) = registry.mcp_trust {
-        if mt.risk_level == RiskLevel::Critical || mt.risk_level == RiskLevel::High {
+        if aa.recommendation == AgentAuditRecommendation::Unsafe {
             return Verdict::Unsafe;
         }
     }
@@ -355,9 +403,22 @@ fn compute_verdict(
         return Verdict::Suspicious;
     }
 
+    // Check for AgentAudit caution recommendation
+    if let Some(ref aa) = registry.agent_audit {
+        if aa.recommendation == AgentAuditRecommendation::Caution {
+            return Verdict::SafeWithAdvisory;
+        }
+    }
+
     // Check for medium findings
-    let has_high = findings.iter().any(|f| f.severity == Severity::High);
+    let has_high = all_findings.iter().any(|f| f.severity == Severity::High);
     if has_high {
+        return Verdict::SafeWithAdvisory;
+    }
+
+    // Check for medium-level command findings (SafeWithAdvisory)
+    let has_medium = all_findings.iter().any(|f| f.severity == Severity::Medium);
+    if has_medium {
         return Verdict::SafeWithAdvisory;
     }
 

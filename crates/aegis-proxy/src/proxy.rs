@@ -7,7 +7,9 @@ use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::oneshot;
 use tracing::{debug, info, instrument, warn};
 
 type BoxBody = http_body_util::combinators::BoxBody<Bytes, hyper::Error>;
@@ -19,12 +21,41 @@ fn full_body(data: Bytes) -> BoxBody {
 }
 
 /// Start the MITM proxy on the given port.
-#[instrument(skip(state))]
-pub async fn start_proxy(state: Arc<ProxyState>) -> Result<(), ProxyError> {
+///
+/// If `ready_tx` is provided, it will be sent `Ok(())` once the listener is
+/// bound successfully, or `Err(ProxyError)` if binding fails.  This lets the
+/// caller wait for the proxy to be ready before spawning a child process.
+#[instrument(skip(state, ready_tx))]
+pub async fn start_proxy(
+    state: Arc<ProxyState>,
+    ready_tx: Option<oneshot::Sender<Result<(), ProxyError>>>,
+) -> Result<(), ProxyError> {
     let addr = SocketAddr::from(([127, 0, 0, 1], state.proxy_port));
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| ProxyError::BindError(format!("bind {addr}: {e}")))?;
+    let listener = match TcpListener::bind(addr).await {
+        Ok(l) => {
+            if let Some(tx) = ready_tx {
+                let _ = tx.send(Ok(()));
+            }
+            l
+        }
+        Err(e) => {
+            let err = if e.kind() == std::io::ErrorKind::AddrInUse {
+                ProxyError::BindError(format!(
+                    "port {} already in use — another aegis instance may be running. \
+                     Use -p to pick a different port.",
+                    state.proxy_port
+                ))
+            } else {
+                ProxyError::BindError(format!("bind {addr}: {e}"))
+            };
+            if let Some(tx) = ready_tx {
+                // Send a descriptive error back; we construct a second error
+                // for the return because ProxyError is not Clone.
+                let _ = tx.send(Err(ProxyError::BindError(err.to_string())));
+            }
+            return Err(err);
+        }
+    };
 
     info!(addr = %addr, "proxy listening");
 
@@ -94,7 +125,7 @@ fn check_proxy_auth(req: &Request<hyper::body::Incoming>, expected_token: &str) 
     };
 
     let expected = format!("aegis:{expected_token}");
-    credentials == expected
+    credentials.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
 /// Handle a single HTTP request (either CONNECT tunnel or direct proxy).
@@ -211,6 +242,14 @@ async fn handle_passthrough_tunnel<I>(client_io: I, host_port: &str) -> Result<(
 where
     I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    // Block connections to private/internal networks
+    let host = host_port.split(':').next().unwrap_or(host_port);
+    if is_private_address(host) {
+        return Err(ProxyError::BindError(format!(
+            "blocked connection to private address: {host_port}"
+        )));
+    }
+
     let server_stream = TcpStream::connect(host_port)
         .await
         .map_err(|e| ProxyError::BindError(format!("connect to {host_port}: {e}")))?;
@@ -261,4 +300,17 @@ fn make_server_tls_config(
     .map_err(|e| ProxyError::TlsError(format!("server config: {e}")))?;
 
     Ok(config)
+}
+
+fn is_private_address(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback(),
+        }
+    } else {
+        // For hostnames, block "localhost" variants
+        let lower = host.to_lowercase();
+        lower == "localhost" || lower.ends_with(".local") || lower.ends_with(".internal")
+    }
 }

@@ -16,6 +16,11 @@ aegis-secrets = { path = "../aegis-secrets" }
 aegis-mcp = { path = "../aegis-mcp" }
 aegis-proxy = { path = "../aegis-proxy" }
 aegis-tui = { path = "../aegis-tui" }
+aegis-skills = { path = "../aegis-skills" }
+aegis-watch = { path = "../aegis-watch" }
+aegis-behavior = { path = "../aegis-behavior" }
+aegis-report = { path = "../aegis-report" }
+aegis-stdio = { path = "../aegis-stdio" }
 
 clap.workspace = true
 tokio.workspace = true

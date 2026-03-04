@@ -1,6 +1,6 @@
 use aegis_mcp::{
-    self, discover, ConfigFinding, ExposureCheck, HashChange, HashChangeType, McpAuditResult,
-    Severity, Verdict,
+    self, discover, ConfigFinding, ExposureCheck, FindingType, HashChange, HashChangeType,
+    McpAuditResult, Severity, Verdict,
 };
 use aegis_tui::report::ScanReport;
 use anyhow::{Context, Result};
@@ -14,7 +14,11 @@ pub async fn run_scan(
     refresh: bool,
     json_output: Option<&Path>,
     trust_project: bool,
+    no_exec: bool,
 ) -> Result<()> {
+    // Silently sync bundled security data
+    sync_security_data(aegis_dir, refresh).await;
+
     println!("{}", "⠿ Scanning MCP servers...".dimmed());
 
     // 1. Discover MCP configs
@@ -28,7 +32,7 @@ pub async fn run_scan(
     let mut audit_results: Vec<McpAuditResult> = Vec::new();
     for server in &servers {
         println!("{}", format!("⠿ Auditing {}...", server.name).dimmed());
-        match aegis_mcp::audit_mcp_server(server, refresh, trust_project).await {
+        match aegis_mcp::audit_mcp_server(server, refresh, trust_project, no_exec).await {
             Ok(result) => audit_results.push(result),
             Err(e) => {
                 eprintln!(
@@ -96,6 +100,32 @@ pub async fn run_scan(
         println!();
     }
 
+    // Skills analysis section
+    let skills = aegis_skills::discover::discover_skills();
+    if !skills.is_empty() {
+        println!(
+            "{}",
+            format!("SKILLS ANALYSIS ({} skills found)", skills.len()).bold()
+        );
+        println!();
+
+        for skill in &skills {
+            match aegis_skills::analyze::analyze_skill(skill) {
+                Ok(analysis) => {
+                    print_skill_analysis(&analysis);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  {}: Failed to analyze {}: {e}",
+                        "Warning".yellow(),
+                        skill.path.display()
+                    );
+                }
+            }
+        }
+        println!();
+    }
+
     // Hash changes
     let all_hash_changes: Vec<&HashChange> = audit_results
         .iter()
@@ -111,12 +141,14 @@ pub async fn run_scan(
                 change.tool_name.yellow()
             );
             if let Some(ref prev) = change.previous_hash {
-                println!("     Previous hash: {}...", &prev[..12]);
+                let display = prev.get(..12).unwrap_or(prev);
+                println!("     Previous hash: {}...", display);
             }
-            println!(
-                "     Current hash:  {}...",
-                &change.current_hash[..12.min(change.current_hash.len())]
-            );
+            let display = change
+                .current_hash
+                .get(..12)
+                .unwrap_or(&change.current_hash);
+            println!("     Current hash:  {}...", display);
         }
         println!();
     }
@@ -196,45 +228,40 @@ fn print_mcp_result(result: &McpAuditResult) {
 
     println!("  {} v{}", result.identity.name.bold(), version);
 
-    // AgentAudit
-    if let Some(ref aa) = result.registry.agent_audit {
-        let trust_label = if aa.trust_score >= 70 {
-            "TRUSTED ✅".green().to_string()
-        } else if aa.trust_score >= 40 {
-            "UNKNOWN ⚠️".yellow().to_string()
-        } else {
-            "DANGER 🔴".red().to_string()
-        };
-        println!(
-            "  ├─ AgentAudit:  {}/100{:>30}",
-            aa.trust_score, trust_label
-        );
-        for asf in &aa.asf_ids {
-            println!("  │   ↳ {asf}");
-        }
+    // Command analysis findings (pre-execution)
+    if result.command_findings.is_empty() {
+        println!("  ├─ Command:     Safe to execute");
     } else {
-        println!(
-            "  ├─ AgentAudit:  {}{}",
-            "NOT FOUND".dimmed(),
-            format!("{:>30}", "UNKNOWN ⚠️").yellow()
-        );
+        for finding in &result.command_findings {
+            let icon = severity_icon(&finding.severity);
+            println!("  ├─ Command:     {icon} {}", finding.detail);
+        }
     }
 
-    // MCP Trust
-    if let Some(ref mt) = result.registry.mcp_trust {
-        let risk_label = match mt.risk_level {
-            aegis_mcp::RiskLevel::Low => "TRUSTED ✅".green().to_string(),
-            aegis_mcp::RiskLevel::Medium => "CAUTION ⚠️".yellow().to_string(),
-            aegis_mcp::RiskLevel::High => "DANGER 🔴".red().to_string(),
-            aegis_mcp::RiskLevel::Critical => "DANGER 🔴".red().to_string(),
+    // AgentAudit
+    if let Some(ref aa) = result.registry.agent_audit {
+        let rec_label = match aa.recommendation {
+            aegis_mcp::AgentAuditRecommendation::Safe => "SAFE \u{2705}".green().to_string(),
+            aegis_mcp::AgentAuditRecommendation::Caution => {
+                "CAUTION \u{26a0}\u{fe0f}".yellow().to_string()
+            }
+            aegis_mcp::AgentAuditRecommendation::Unsafe => "UNSAFE \u{1f534}".red().to_string(),
+            aegis_mcp::AgentAuditRecommendation::NotAudited => "NOT AUDITED".dimmed().to_string(),
         };
-        println!("  ├─ MCP Trust:   {} Risk{:>28}", mt.risk_level, risk_label);
-    } else {
         println!(
-            "  ├─ MCP Trust:   {}{}",
-            "NOT FOUND".dimmed(),
-            format!("{:>30}", "UNKNOWN ⚠️").yellow()
+            "  \u{251c}\u{2500} AgentAudit:  {}/100 \u{2014} {rec_label}",
+            aa.trust_score
         );
+        let sb = &aa.severity_breakdown;
+        println!(
+            "  \u{2502}   \u{21b3} {} \u{00b7} C:{} H:{} M:{} L:{}",
+            aa.audit_level, sb.critical, sb.high, sb.medium, sb.low
+        );
+        if let Some(ref url) = aa.url {
+            println!("  \u{2502}   \u{21b3} {url}");
+        }
+    } else {
+        println!("  \u{251c}\u{2500} AgentAudit:  {}", "NOT AUDITED".dimmed());
     }
 
     // CVEs
@@ -299,9 +326,13 @@ fn count_findings(
     }
     critical += exposure.dangerous_env_vars.len();
 
-    // MCP findings
+    // MCP findings (local + command analysis)
     for result in results {
-        for finding in &result.local_findings {
+        for finding in result
+            .local_findings
+            .iter()
+            .chain(result.command_findings.iter())
+        {
             match finding.severity {
                 Severity::Critical => critical += 1,
                 Severity::High => high += 1,
@@ -547,6 +578,19 @@ fn generate_recommendations(exposure: &ExposureCheck, results: &[McpAuditResult]
         }
     }
 
+    // Servers with dangerous commands
+    for result in results {
+        let has_dangerous_cmd = result.command_findings.iter().any(|f| {
+            f.finding_type == FindingType::DangerousCommand && f.severity >= Severity::High
+        });
+        if has_dangerous_cmd && result.verdict != Verdict::Unsafe {
+            recs.push(format!(
+                "Review command configuration for MCP server '{}'",
+                result.identity.name
+            ));
+        }
+    }
+
     // Exposure
     if !exposure.claudeignore_blocks_env {
         recs.push("Add .env patterns to .claudeignore".into());
@@ -580,12 +624,102 @@ fn build_json_report(
     results: &[McpAuditResult],
     config_findings: &[ConfigFinding],
 ) -> serde_json::Value {
+    // Build per-server command analysis summaries
+    let command_analysis: Vec<serde_json::Value> = results
+        .iter()
+        .filter(|r| !r.command_findings.is_empty())
+        .map(|r| {
+            serde_json::json!({
+                "server": r.identity.name,
+                "findings": r.command_findings,
+            })
+        })
+        .collect();
+
     serde_json::json!({
         "score": score,
         "risk_level": risk,
         "timestamp": Utc::now().to_rfc3339(),
         "exposure": exposure,
         "mcp_audits": results,
+        "command_analysis": command_analysis,
         "config_findings": config_findings,
     })
+}
+
+/// Silently sync bundled security data to ~/.aegis at scan start.
+/// Errors are debug-logged and never fail the scan.
+async fn sync_security_data(aegis_dir: &std::path::Path, force_refresh: bool) {
+    // 1. Sync CVE database from bundled data
+    let cve_dest = aegis_dir.join("cve_cache.json");
+    for src in &["data/cve_cache.json"] {
+        let src = std::path::Path::new(src);
+        if src.exists() {
+            if let Err(e) = std::fs::copy(src, &cve_dest) {
+                tracing::debug!("CVE sync skipped: {e}");
+            }
+            break;
+        }
+    }
+
+    // 2. Sync secret patterns from bundled data
+    let patterns_dest = aegis_dir.join("patterns.toml");
+    for src in &["data/patterns.toml"] {
+        let src = std::path::Path::new(src);
+        if src.exists() {
+            if let Ok(bundled) = std::fs::read_to_string(src) {
+                let needs_update = std::fs::read_to_string(&patterns_dest)
+                    .map(|current| current != bundled)
+                    .unwrap_or(true);
+                if needs_update {
+                    let _ = std::fs::write(&patterns_dest, &bundled);
+                }
+            }
+            break;
+        }
+    }
+
+    // 3. Force-refresh AgentAudit catalog if --refresh (otherwise lazy 24h TTL handles it)
+    if force_refresh {
+        if let Err(e) = aegis_mcp::registry::fetch_and_cache_catalog().await {
+            tracing::debug!("catalog refresh skipped: {e}");
+        }
+    }
+}
+
+fn print_skill_analysis(analysis: &aegis_skills::SkillAnalysis) {
+    let path_str = analysis.path.display().to_string();
+    let scope_str = format!("[{}]", analysis.scope);
+
+    if analysis.findings.is_empty() {
+        println!("  {} {scope_str}", path_str.dimmed());
+        println!("  └─ Verdict: {}", "SAFE ✅".green());
+    } else {
+        println!("  {} {scope_str}", path_str.bold());
+        let has_critical = analysis
+            .findings
+            .iter()
+            .any(|f| f.severity >= aegis_skills::Severity::Critical);
+
+        for finding in &analysis.findings {
+            let icon = match finding.severity {
+                aegis_skills::Severity::Critical => "🔴",
+                aegis_skills::Severity::High => "⚠️ ",
+                aegis_skills::Severity::Medium => "🟡",
+                _ => "ℹ️ ",
+            };
+            println!(
+                "  ├─ {icon} {} (line {})",
+                finding.detail, finding.line_number
+            );
+        }
+
+        let verdict = if has_critical {
+            "MALICIOUS 🔴".red().to_string()
+        } else {
+            "REVIEW REQUIRED ⚠️".yellow().to_string()
+        };
+        println!("  └─ Verdict: {verdict}");
+    }
+    println!();
 }

@@ -222,7 +222,10 @@ mod tests {
             .iter()
             .find(|p| p.name == "aws_access_key")
             .unwrap();
+        // Valid AKIA-prefixed key must match
         assert!(aws.regex.is_match(b"AKIAIOSFODNN7EXAMPLE"));
         assert!(!aws.regex.is_match(b"not_an_aws_key"));
+        // Redaction markers must NOT re-trigger the pattern
+        assert!(!aws.regex.is_match(b"[AEGIS:aws_access_key:REDACTED]"));
     }
 }

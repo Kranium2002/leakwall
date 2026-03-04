@@ -85,8 +85,8 @@ impl std::fmt::Display for Action {
 /// Scan mode determining action on secret detection.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub enum ScanMode {
-    #[default]
     WarnOnly,
+    #[default]
     Redact,
     Block,
 }

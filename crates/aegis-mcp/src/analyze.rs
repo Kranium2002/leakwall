@@ -228,13 +228,15 @@ fn extract_context(text: &str, pattern: &str) -> String {
     let pattern_lower = pattern.to_lowercase();
     if let Some(pos) = lower.find(&pattern_lower) {
         let start_pos = pos.saturating_sub(20);
-        let end_pos = (pos + pattern.len() + 20).min(text.len());
-        // Find safe UTF-8 char boundaries to avoid panics on multi-byte chars
-        let start = (0..=start_pos)
+        let end_pos = (pos + pattern_lower.len() + 20).min(lower.len());
+        // Use positions on the lowered string (same byte length as original for ASCII).
+        // Clamp to text.len() and find safe UTF-8 char boundaries to avoid panics
+        // when lowercasing changes byte length for non-ASCII characters.
+        let start = (0..=start_pos.min(text.len()))
             .rev()
             .find(|&i| text.is_char_boundary(i))
             .unwrap_or(0);
-        let end = (end_pos..=text.len())
+        let end = (end_pos.min(text.len())..=text.len())
             .find(|&i| text.is_char_boundary(i))
             .unwrap_or(text.len());
         format!("...{}...", &text[start..end])

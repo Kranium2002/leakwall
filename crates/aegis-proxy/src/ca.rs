@@ -59,11 +59,12 @@ pub fn load_or_generate_ca(aegis_dir: &Path) -> Result<(String, Zeroizing<String
     std::fs::write(&key_path, key_pem.as_str())
         .map_err(|e| ProxyError::CaError(format!("write CA key: {e}")))?;
 
-    // Best-effort chmod 600 on key
+    // Hard error on Unix if key permissions cannot be set
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| ProxyError::CaError(format!("set CA key permissions: {e}")))?;
     }
 
     #[cfg(windows)]
@@ -84,11 +85,17 @@ pub fn load_or_generate_ca(aegis_dir: &Path) -> Result<(String, Zeroizing<String
 }
 
 /// Generate a certificate for a specific host, signed by the CA.
+///
+/// Note: `ca_cert_pem` is accepted but not parsed directly. The CA certificate
+/// parameters are reconstructed from scratch because `rcgen` does not provide a
+/// `from_ca_cert_pem` API. The reconstructed DN (CommonName + OrganizationName)
+/// must exactly match the original CA subject for cert chain verification.
 pub fn generate_host_cert(
     host: &str,
-    _ca_cert_pem: &str,
+    ca_cert_pem: &str,
     ca_key_pem: &str,
 ) -> Result<CertifiedKeyPair, ProxyError> {
+    let _ = ca_cert_pem; // reserved for future use if rcgen adds PEM import
     let ca_key = KeyPair::from_pem(ca_key_pem)
         .map_err(|e| ProxyError::CaError(format!("parse CA key: {e}")))?;
 

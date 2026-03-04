@@ -75,12 +75,12 @@ fn load_cve_database() -> Result<Vec<CveEntry>, crate::McpError> {
     }
 
     // Also try ~/.aegis/cve_cache.json
-    let home_cache = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".aegis/cve_cache.json");
-    if let Ok(content) = std::fs::read_to_string(&home_cache) {
-        if let Ok(entries) = serde_json::from_str::<Vec<CveEntry>>(&content) {
-            return Ok(entries);
+    if let Some(home) = dirs::home_dir() {
+        let home_cache = home.join(".aegis/cve_cache.json");
+        if let Ok(content) = std::fs::read_to_string(&home_cache) {
+            if let Ok(entries) = serde_json::from_str::<Vec<CveEntry>>(&content) {
+                return Ok(entries);
+            }
         }
     }
 
@@ -88,8 +88,21 @@ fn load_cve_database() -> Result<Vec<CveEntry>, crate::McpError> {
     Ok(vec![])
 }
 
-/// Simple version comparison (naive: compares as strings).
+/// Version comparison using the semver crate, with naive fallback.
 fn is_version_before(current: &str, fixed: &str) -> bool {
+    let current_clean = current.trim_start_matches('v');
+    let fixed_clean = fixed.trim_start_matches('v');
+    match (
+        semver::Version::parse(current_clean),
+        semver::Version::parse(fixed_clean),
+    ) {
+        (Ok(c), Ok(f)) => c < f,
+        _ => naive_version_before(current, fixed),
+    }
+}
+
+/// Fallback for non-semver version strings.
+fn naive_version_before(current: &str, fixed: &str) -> bool {
     let parse = |v: &str| -> Vec<u32> {
         v.split('.')
             .filter_map(|s| s.trim_start_matches('v').parse().ok())
@@ -116,11 +129,22 @@ mod tests {
 
     #[test]
     fn test_version_comparison() {
+        // Semver path
         assert!(is_version_before("1.0.0", "1.0.1"));
         assert!(is_version_before("1.0.0", "1.1.0"));
         assert!(is_version_before("1.0.0", "2.0.0"));
         assert!(!is_version_before("1.0.1", "1.0.0"));
         assert!(!is_version_before("2.0.0", "1.0.0"));
         assert!(!is_version_before("1.0.0", "1.0.0"));
+        // v-prefix handled
+        assert!(is_version_before("v1.0.0", "v1.0.1"));
+        assert!(!is_version_before("v2.0.0", "v1.0.0"));
+    }
+
+    #[test]
+    fn test_naive_version_fallback() {
+        // Non-semver strings fall back to naive comparison
+        assert!(is_version_before("1.0", "1.1"));
+        assert!(!is_version_before("2.0", "1.0"));
     }
 }

@@ -46,31 +46,37 @@ pub fn build_session_report(
     let total_requests = logs.len();
     let total_bytes: usize = logs.iter().map(|l| l.body_size).sum();
 
-    // Group by match patterns
-    let mut pattern_counts: HashMap<String, (usize, usize, String)> = HashMap::new();
+    // Group by action type and aggregate match counts
+    let mut action_counts: HashMap<String, (usize, usize)> = HashMap::new();
     for log in logs {
         if log.matches_count > 0 {
-            let action_str = format!("{}", log.action);
-            // We don't have individual match details in RequestLog,
-            // so we track aggregate counts
-            let entry = pattern_counts
-                .entry("aggregate".into())
-                .or_insert((0, 0, action_str));
+            let action_key = match &log.action {
+                aegis_proxy::Action::Warned => "WARNED".to_string(),
+                aegis_proxy::Action::Redacted { .. } => "REDACTED".to_string(),
+                aegis_proxy::Action::Blocked => "BLOCKED".to_string(),
+                aegis_proxy::Action::Passed => "PASSED".to_string(),
+            };
+            let entry = action_counts.entry(action_key).or_insert((0, 0));
             entry.0 += log.matches_count;
             entry.1 += 1;
         }
     }
 
-    let pattern_matches: Vec<PatternSummary> = pattern_counts
+    let pattern_matches: Vec<PatternSummary> = action_counts
         .into_iter()
-        .map(
-            |(pattern, (match_count, request_count, action))| PatternSummary {
-                pattern,
+        .map(|(action_key, (match_count, request_count))| {
+            let action = if action_key == "REDACTED" {
+                format!("REDACTED ({match_count})")
+            } else {
+                action_key
+            };
+            PatternSummary {
+                pattern: "aggregate".into(),
                 match_count,
                 request_count,
                 action,
-            },
-        )
+            }
+        })
         .collect();
 
     SessionReport {

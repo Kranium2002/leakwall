@@ -1,9 +1,7 @@
 use aegis_proxy::ca::load_or_generate_ca;
 use aegis_proxy::process::spawn_agent;
 use aegis_proxy::proxy::start_proxy;
-use aegis_proxy::{
-    generate_proxy_token, ProxyEvent, ProxyState, ScanMode, DEFAULT_MAX_BODY_SIZE,
-};
+use aegis_proxy::{generate_proxy_token, ProxyEvent, ProxyState, ScanMode, DEFAULT_MAX_BODY_SIZE};
 use aegis_secrets::patterns::{compile_patterns, default_pattern_defs, load_patterns};
 use aegis_secrets::scanner::{KnownSecretInfo, SecretScanner};
 use aegis_tui::dashboard::run_dashboard;
@@ -58,16 +56,21 @@ pub async fn run_proxy(
         proxy_token: proxy_token.clone(),
     });
 
-    // 6. Start proxy in background
+    // 6. Start proxy in background with readiness signal
     let proxy_state = Arc::clone(&state);
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let _proxy_handle = tokio::spawn(async move {
-        if let Err(e) = start_proxy(proxy_state).await {
+        if let Err(e) = start_proxy(proxy_state, Some(ready_tx)).await {
             tracing::error!(error = %e, "proxy error");
         }
     });
 
-    // Give proxy a moment to bind
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // Wait for proxy to bind before spawning child — if it fails, bail out
+    // instead of spawning a child that would connect to a wrong proxy.
+    ready_rx
+        .await
+        .map_err(|_| anyhow::anyhow!("proxy task exited before signaling readiness"))?
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // 7. Spawn the agent process
     let mut child = spawn_agent(command, port, &ca_cert_path, aegis_dir, &proxy_token)
@@ -87,7 +90,10 @@ pub async fn run_proxy(
     if headless {
         let log_path = aegis_dir.join("logs/live.log");
         eprintln!("[aegis] headless mode — live log: {}", log_path.display());
-        eprintln!("[aegis] tip: tail -f {} in another terminal", log_path.display());
+        eprintln!(
+            "[aegis] tip: tail -f {} in another terminal",
+            log_path.display()
+        );
         tokio::spawn(run_headless_consumer(event_rx, log_path));
     } else {
         let tui_mode = Arc::clone(&shared_mode);
@@ -162,12 +168,14 @@ async fn run_headless_consumer(
                 // In headless mode, only log to file — avoid stderr noise that
                 // interleaves with the child process's terminal output.
 
-                // Append JSONL line
+                // Append JSONL line and flush so `tail -f` sees it immediately
                 if let Ok(json) = serde_json::to_string(&event) {
                     let mut line = json.into_bytes();
                     line.push(b'\n');
                     if let Err(e) = file.write_all(&line).await {
                         tracing::error!(error = %e, "failed to write to live log");
+                    } else if let Err(e) = file.flush().await {
+                        tracing::error!(error = %e, "failed to flush live log");
                     }
                 }
             }

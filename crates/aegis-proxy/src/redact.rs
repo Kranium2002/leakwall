@@ -5,22 +5,31 @@ use std::sync::Arc;
 /// JSON-aware redaction: parse the body as JSON, scan each decoded string
 /// value for secrets, replace matches, and re-serialize. This avoids
 /// breaking JSON escape sequences that byte-level replacement would corrupt.
-pub fn redact_json_body(body: &[u8], scanner: &Arc<SecretScanner>) -> Bytes {
+///
+/// Returns the redacted body and the number of actual replacements made.
+pub fn redact_json_body(body: &[u8], scanner: &Arc<SecretScanner>) -> (Bytes, usize) {
     let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(body) else {
         // Not valid JSON — fall back to byte-level redaction
         let result = scanner.scan(body);
-        return Bytes::from(redact_body(body, &result.matches));
+        let count = result.matches.len();
+        return (Bytes::from(redact_body(body, &result.matches)), count);
     };
 
-    redact_json_value(&mut json, scanner);
+    let mut count = 0;
+    redact_json_value(&mut json, scanner, &mut count);
 
-    serde_json::to_vec(&json)
+    let bytes = serde_json::to_vec(&json)
         .map(Bytes::from)
-        .unwrap_or_else(|_| Bytes::from(body.to_vec()))
+        .unwrap_or_else(|_| Bytes::from(body.to_vec()));
+    (bytes, count)
 }
 
 /// Recursively walk a JSON value and redact secrets in all string values.
-fn redact_json_value(value: &mut serde_json::Value, scanner: &Arc<SecretScanner>) {
+fn redact_json_value(
+    value: &mut serde_json::Value,
+    scanner: &Arc<SecretScanner>,
+    count: &mut usize,
+) {
     match value {
         serde_json::Value::String(s) => {
             let result = scanner.scan(s.as_bytes());
@@ -31,9 +40,13 @@ fn redact_json_value(value: &mut serde_json::Value, scanner: &Arc<SecretScanner>
                 sorted.sort_by(|a, b| b.byte_offset.cmp(&a.byte_offset));
                 for m in &sorted {
                     let end = m.byte_offset + m.match_length;
-                    if end <= redacted.len() {
+                    if end <= redacted.len()
+                        && redacted.is_char_boundary(m.byte_offset)
+                        && redacted.is_char_boundary(end)
+                    {
                         let replacement = format!("[AEGIS:{}:REDACTED]", m.pattern_name);
                         redacted.replace_range(m.byte_offset..end, &replacement);
+                        *count += 1;
                     }
                 }
                 *s = redacted;
@@ -41,12 +54,12 @@ fn redact_json_value(value: &mut serde_json::Value, scanner: &Arc<SecretScanner>
         }
         serde_json::Value::Array(arr) => {
             for item in arr.iter_mut() {
-                redact_json_value(item, scanner);
+                redact_json_value(item, scanner, count);
             }
         }
         serde_json::Value::Object(map) => {
             for (_key, val) in map.iter_mut() {
-                redact_json_value(val, scanner);
+                redact_json_value(val, scanner, count);
             }
         }
         _ => {}

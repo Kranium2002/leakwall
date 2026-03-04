@@ -6,11 +6,10 @@ use tracing::{debug, instrument, warn};
 
 /// Extract server identity from config.
 pub fn extract_identity(server: &McpServerConfig) -> ServerIdentity {
-    // Try to extract version from command/args
     let package_name = server.command.as_ref().and_then(|cmd| {
-        // If it's an npx command, extract package name
         if cmd.contains("npx") || cmd.contains("npm") {
-            server.args.first().cloned()
+            // Find the first arg that looks like a package name (skip flags like -y, --yes)
+            server.args.iter().find(|a| !a.starts_with('-')).cloned()
         } else {
             Some(cmd.clone())
         }
@@ -25,23 +24,12 @@ pub fn extract_identity(server: &McpServerConfig) -> ServerIdentity {
 
 /// Connect to an MCP server and list its tools.
 ///
-/// When `trust_project` is false and the server comes from a project-level config,
-/// execution is skipped to prevent arbitrary command execution from untrusted repos.
+/// The caller is responsible for deciding whether to call this function.
+/// Pre-execution command analysis in `audit_mcp_server()` gates execution.
 #[instrument(skip_all, fields(server = %server.name))]
 pub async fn connect_and_list_tools(
     server: &McpServerConfig,
-    trust_project: bool,
 ) -> Result<Vec<ToolDefinition>, McpError> {
-    // Refuse to execute project-level MCP servers unless explicitly trusted
-    if matches!(server.source.scope, crate::ConfigScope::Project) && !trust_project {
-        warn!(
-            "Skipping execution of project-level MCP server '{}' \
-             — use --trust-project to enable",
-            server.name
-        );
-        return Ok(vec![]);
-    }
-
     // For stdio-based servers, we'd need to spawn the process and
     // communicate via JSON-RPC over stdin/stdout.
     // For HTTP-based servers, we'd make HTTP requests.

@@ -32,6 +32,9 @@ pub fn discover_mcp_configs() -> Result<Vec<McpConfigLocation>, McpError> {
         &home.join(".claude/settings.json"),
         ConfigScope::Global,
     );
+    // Claude Code stores per-project MCP servers in ~/.claude.json under
+    // projects[<project-path>].mcpServers. We treat these as project-scoped.
+    try_add_claude_json(&mut configs, &home.join(".claude.json"), &cwd);
     try_add(
         &mut configs,
         AgentType::ClaudeCode,
@@ -116,6 +119,23 @@ fn try_add(
     }
 }
 
+/// Check `~/.claude.json` for per-project MCP servers matching the current working directory.
+///
+/// Claude Code stores per-project MCP servers in `~/.claude.json` under:
+/// `{ "projects": { "/path/to/project": { "mcpServers": { ... } } } }`
+///
+/// We synthesize a virtual config location so `parse_mcp_servers` can handle it,
+/// but since the file format is unique we handle parsing in `discover_all_servers` instead.
+fn try_add_claude_json(configs: &mut Vec<McpConfigLocation>, path: &std::path::Path, _cwd: &Path) {
+    if path.exists() {
+        configs.push(McpConfigLocation {
+            agent: AgentType::ClaudeCode,
+            path: path.to_path_buf(),
+            scope: ConfigScope::Project,
+        });
+    }
+}
+
 /// Parse MCP server configs from a discovered config location.
 pub fn parse_mcp_servers(location: &McpConfigLocation) -> Result<Vec<McpServerConfig>, McpError> {
     let content = std::fs::read_to_string(&location.path).map_err(|e| {
@@ -131,16 +151,45 @@ pub fn parse_mcp_servers(location: &McpConfigLocation) -> Result<Vec<McpServerCo
 
     let mut servers = Vec::new();
 
-    // Try "mcpServers" key (Claude Desktop, Claude Code format)
-    if let Some(mcp_servers) = value
-        .get("mcpServers")
-        .or_else(|| value.get("mcp_servers"))
-        .or_else(|| value.get("servers"))
-        .and_then(|v| v.as_object())
-    {
-        for (name, config) in mcp_servers {
-            let server = parse_single_server(name, config, location);
-            servers.push(server);
+    // ~/.claude.json has a special per-project structure:
+    // { "projects": { "/path/to/project": { "mcpServers": { ... } } } }
+    let is_claude_json = location
+        .path
+        .file_name()
+        .is_some_and(|f| f == ".claude.json");
+
+    if is_claude_json {
+        if let Some(projects) = value.get("projects").and_then(|p| p.as_object()) {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let cwd_str = cwd.to_string_lossy();
+            for (project_path, project_val) in projects {
+                // Match if the project path matches our cwd (normalize trailing slashes)
+                let proj_normalized = project_path.trim_end_matches('/');
+                let cwd_normalized = cwd_str.trim_end_matches('/');
+                if proj_normalized != cwd_normalized {
+                    continue;
+                }
+                if let Some(mcp_servers) = project_val.get("mcpServers").and_then(|v| v.as_object())
+                {
+                    for (name, config) in mcp_servers {
+                        let server = parse_single_server(name, config, location);
+                        servers.push(server);
+                    }
+                }
+            }
+        }
+    } else {
+        // Standard format: top-level "mcpServers" / "mcp_servers" / "servers"
+        if let Some(mcp_servers) = value
+            .get("mcpServers")
+            .or_else(|| value.get("mcp_servers"))
+            .or_else(|| value.get("servers"))
+            .and_then(|v| v.as_object())
+        {
+            for (name, config) in mcp_servers {
+                let server = parse_single_server(name, config, location);
+                servers.push(server);
+            }
         }
     }
 

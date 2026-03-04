@@ -213,8 +213,70 @@ fn collect_json_secrets(
 fn scan_env_vars() -> Vec<DiscoveredSecret> {
     let mut secrets = Vec::new();
     let exclude_names = [
-        "PATH", "HOME", "SHELL", "TERM", "EDITOR", "LANG", "USER", "LOGNAME", "HOSTNAME", "PWD",
-        "OLDPWD", "SHLVL", "DISPLAY", "XDG_", "LC_",
+        "PATH",
+        "HOME",
+        "SHELL",
+        "TERM",
+        "EDITOR",
+        "LANG",
+        "USER",
+        "LOGNAME",
+        "HOSTNAME",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "DISPLAY",
+        "XDG_",
+        "LC_",
+        // Terminal and desktop
+        "TERM_PROGRAM",
+        "TERM_SESSION_ID",
+        "COLORTERM",
+        "WINDOWID",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "DESKTOP_SESSION",
+        "SESSION_MANAGER",
+        "GTK_",
+        "QT_",
+        "GDK_",
+        "GNOME_",
+        "KDE_",
+        "WAYLAND_",
+        "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID",
+        "GPG_AGENT_INFO",
+        // Pager and color
+        "LESS",
+        "PAGER",
+        "MANPATH",
+        "INFOPATH",
+        "LS_COLORS",
+        "LSCOLORS",
+        "CLICOLOR",
+        "GREP_",
+        // Editors and tools
+        "BROWSER",
+        "VISUAL",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        // Language toolchains
+        "CARGO_",
+        "RUSTUP_",
+        "RUSTC",
+        "RUST_",
+        "NVM_",
+        "PYENV_",
+        "GOPATH",
+        "GOROOT",
+        "JAVA_HOME",
+        "NODE_PATH",
+        "VIRTUAL_ENV",
+        "CONDA_",
+        // WSL
+        "WSL_",
+        "WSLENV",
+        "WT_",
     ];
 
     for (key, value) in std::env::vars() {
@@ -265,15 +327,17 @@ fn scan_git_remotes(cwd: &Path) -> Result<Vec<DiscoveredSecret>, SecretError> {
                 // Check for embedded credentials in URLs like https://user:token@github.com
                 if let Some(at_pos) = url.find('@') {
                     if let Some(proto_end) = url.find("://") {
-                        let cred_part = &url[proto_end + 3..at_pos];
-                        if cred_part.contains(':') {
-                            let token = cred_part.split(':').nth(1).unwrap_or(cred_part);
-                            if token.len() >= 8 {
-                                secrets.push(DiscoveredSecret {
-                                    id: Uuid::new_v4(),
-                                    name: "git_remote_token".into(),
-                                    fingerprints: generate_fingerprints(token),
-                                });
+                        let cred_start = proto_end + 3;
+                        if let Some(cred_part) = url.get(cred_start..at_pos) {
+                            if cred_part.contains(':') {
+                                let token = cred_part.split(':').nth(1).unwrap_or(cred_part);
+                                if token.len() >= 8 {
+                                    secrets.push(DiscoveredSecret {
+                                        id: Uuid::new_v4(),
+                                        name: "git_remote_token".into(),
+                                        fingerprints: generate_fingerprints(token),
+                                    });
+                                }
                             }
                         }
                     }
@@ -341,7 +405,11 @@ fn is_common_value(value: &str) -> bool {
 /// Minimum fingerprint length depends on whether the key name looks secret-related.
 /// Secret-looking keys: 4 chars. Everything else: 8 chars.
 fn min_length_for_key(key: &str) -> usize {
-    if is_secret_key_name(key) { 4 } else { 8 }
+    if is_secret_key_name(key) {
+        4
+    } else {
+        8
+    }
 }
 
 /// Check if a key name likely refers to a secret.

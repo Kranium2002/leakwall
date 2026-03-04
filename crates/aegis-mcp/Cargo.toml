@@ -21,7 +21,9 @@ tracing.workspace = true
 thiserror.workspace = true
 urlencoding.workspace = true
 uuid.workspace = true
-fs2 = "0.4"
+fs2.workspace = true
+semver.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true

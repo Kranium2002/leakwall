@@ -1,5 +1,7 @@
+mod cmd_report;
 mod cmd_run;
 mod cmd_scan;
+mod cmd_watch;
 mod config;
 
 use anyhow::{Context, Result};
@@ -24,7 +26,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Audit agent security posture (MCP servers, configs, exposure)
+    /// Audit agent security posture (MCP servers, configs, skills, exposure)
     Scan {
         /// Force fresh registry lookups (ignore cache)
         #[arg(long)]
@@ -37,6 +39,10 @@ enum Commands {
         /// Trust and execute project-level MCP server configs
         #[arg(long)]
         trust_project: bool,
+
+        /// Static analysis only — never execute MCP server commands
+        #[arg(long)]
+        no_exec: bool,
     },
 
     /// Run an agent with runtime protection proxy
@@ -49,13 +55,51 @@ enum Commands {
         #[arg(short, long)]
         port: Option<u16>,
 
-        /// Run without TUI dashboard (log to file + stderr)
-        #[arg(short = 'H', long)]
-        headless: bool,
+        /// Show TUI dashboard instead of headless mode
+        #[arg(short = 'T', long)]
+        tui: bool,
 
         /// Command to run (after --)
         #[arg(last = true, required = true)]
         command: Vec<String>,
+    },
+
+    /// Monitor for security changes in real-time (daemon mode)
+    Watch {
+        /// Start the daemon in background
+        #[arg(long)]
+        daemon: bool,
+
+        /// Start in foreground (for debugging)
+        #[arg(long)]
+        foreground: bool,
+
+        /// Query daemon status
+        #[arg(long)]
+        status: bool,
+
+        /// Stop the daemon
+        #[arg(long)]
+        stop: bool,
+
+        /// Suppress desktop notifications
+        #[arg(short, long)]
+        quiet: bool,
+    },
+
+    /// Generate reports (HTML, SARIF, JSON)
+    Report {
+        /// Generate HTML report
+        #[arg(long)]
+        html: bool,
+
+        /// Auto-open report in browser
+        #[arg(long)]
+        open: bool,
+
+        /// Output format: sarif, json
+        #[arg(long)]
+        format: Option<String>,
     },
 }
 
@@ -65,7 +109,7 @@ async fn main() -> Result<()> {
 
     // Initialize tracing — in headless mode, suppress non-error logs to avoid
     // interleaving with the child process's terminal output.
-    let is_headless = matches!(&cli.command, Commands::Run { headless: true, .. });
+    let is_headless = matches!(&cli.command, Commands::Run { tui: false, .. });
     let filter = if cli.verbose {
         "aegis=debug"
     } else if is_headless {
@@ -94,15 +138,16 @@ async fn main() -> Result<()> {
             refresh,
             json,
             trust_project,
+            no_exec,
         } => {
-            cmd_scan::run_scan(&aegis_dir, refresh, json.as_deref(), trust_project)
+            cmd_scan::run_scan(&aegis_dir, refresh, json.as_deref(), trust_project, no_exec)
                 .await
                 .context("aegis scan failed")?;
         }
         Commands::Run {
             mode,
             port,
-            headless,
+            tui,
             command,
         } => {
             let mode_str = mode.unwrap_or(cfg.mode);
@@ -112,9 +157,26 @@ async fn main() -> Result<()> {
                 "block" => aegis_proxy::ScanMode::Block,
                 _ => aegis_proxy::ScanMode::WarnOnly,
             };
+            let headless = !tui;
             cmd_run::run_proxy(&aegis_dir, port, scan_mode, &command, headless)
                 .await
                 .context("aegis run failed")?;
+        }
+        Commands::Watch {
+            daemon,
+            foreground,
+            status,
+            stop,
+            quiet,
+        } => {
+            cmd_watch::run_watch(&aegis_dir, daemon, foreground, status, stop, quiet)
+                .await
+                .context("aegis watch failed")?;
+        }
+        Commands::Report { html, open, format } => {
+            cmd_report::run_report(&aegis_dir, html, open, format.as_deref())
+                .await
+                .context("aegis report failed")?;
         }
     }
 

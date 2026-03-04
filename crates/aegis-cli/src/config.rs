@@ -36,8 +36,6 @@ pub struct RegistryConfig {
     pub enabled: bool,
     #[serde(default = "default_agentaudit_url")]
     pub agentaudit_url: String,
-    #[serde(default = "default_mcp_trust_url")]
-    pub mcp_trust_url: String,
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_hours: i64,
 }
@@ -47,11 +45,7 @@ fn default_registry_enabled() -> bool {
 }
 
 fn default_agentaudit_url() -> String {
-    "https://api.agentaudit.dev/v1".into()
-}
-
-fn default_mcp_trust_url() -> String {
-    "https://api.mcp-trust.com/v1".into()
+    "https://agentaudit.dev/api".into()
 }
 
 fn default_cache_ttl() -> i64 {
@@ -63,7 +57,6 @@ impl Default for RegistryConfig {
         Self {
             enabled: default_registry_enabled(),
             agentaudit_url: default_agentaudit_url(),
-            mcp_trust_url: default_mcp_trust_url(),
             cache_ttl_hours: default_cache_ttl(),
         }
     }
@@ -89,7 +82,7 @@ fn default_proxy_port() -> u16 {
 }
 
 fn default_mode() -> String {
-    "warn".into()
+    "redact".into()
 }
 
 fn default_log_dir() -> PathBuf {
@@ -167,7 +160,7 @@ mod tests {
     fn test_default_config() {
         let config = AegisConfig::default();
         assert_eq!(config.proxy_port, 9090);
-        assert_eq!(config.mode, "warn");
+        assert_eq!(config.mode, "redact");
         assert!(config.mcp_scan.enabled);
         assert!(config.registry.enabled);
         assert_eq!(config.registry.cache_ttl_hours, 24);
@@ -202,7 +195,7 @@ proxy_port = 3000
 "#;
         let config: AegisConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.proxy_port, 3000);
-        assert_eq!(config.mode, "warn");
+        assert_eq!(config.mode, "redact");
         assert!(config.mcp_scan.enabled);
     }
 

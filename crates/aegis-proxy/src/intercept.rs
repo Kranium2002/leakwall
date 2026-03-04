@@ -35,9 +35,7 @@ fn strip_thinking_blocks(body: &[u8]) -> Bytes {
             continue;
         };
         let before = content.len();
-        content.retain(|block| {
-            block.get("type").and_then(|t| t.as_str()) != Some("thinking")
-        });
+        content.retain(|block| block.get("type").and_then(|t| t.as_str()) != Some("thinking"));
         if content.len() != before {
             changed = true;
         }
@@ -68,11 +66,18 @@ pub async fn handle_intercepted_request(
 
     // Collect request body
     let (parts, body) = req.into_parts();
-    let body_bytes = body
-        .collect()
-        .await
-        .map(|c| c.to_bytes())
-        .unwrap_or_default();
+    let body_bytes = match body.collect().await {
+        Ok(c) => c.to_bytes(),
+        Err(e) => {
+            warn!(error = %e, "failed to read request body");
+            return Ok(Response::builder()
+                .status(502)
+                .body(full_body(Bytes::from(
+                    "[AEGIS] Failed to read request body",
+                )))
+                .unwrap_or_else(|_| Response::new(empty_body())));
+        }
+    };
 
     // Strip signed thinking blocks before scanning/redacting to avoid
     // invalidating their cryptographic signatures.
@@ -116,8 +121,27 @@ pub async fn handle_intercepted_request(
                     host = %host,
                     body_size,
                     max = state.max_body_size,
-                    "request body exceeds max size, cannot redact — forwarding (redact mode)"
+                    "request body exceeds max size, BLOCKED (redact mode)"
                 );
+                let _ = state.event_tx.send(ProxyEvent::RequestIntercepted {
+                    timestamp: Utc::now(),
+                    host: host.to_string(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    body_size,
+                    scan_result: aegis_secrets::scanner::ScanResult {
+                        matches: vec![],
+                        scan_duration: std::time::Duration::ZERO,
+                        body_size,
+                    },
+                    action: Action::Blocked,
+                });
+                return Ok(Response::builder()
+                    .status(413)
+                    .body(full_body(Bytes::from(
+                        "[AEGIS] Request blocked — payload too large to scan",
+                    )))
+                    .unwrap_or_else(|_| Response::new(empty_body())));
             }
             ScanMode::WarnOnly => {
                 warn!(
@@ -166,13 +190,9 @@ pub async fn handle_intercepted_request(
                 (Action::Warned, body_bytes)
             }
             ScanMode::Redact => {
-                let count = scan_result.matches.len();
                 // Use JSON-aware redaction to avoid breaking JSON escape
                 // sequences and producing invalid request bodies.
-                let redacted = redact::redact_json_body(
-                    &body_bytes,
-                    &state.scanner,
-                );
+                let (redacted, count) = redact::redact_json_body(&body_bytes, &state.scanner);
                 info!(
                     host = %host,
                     redacted = count,
@@ -218,14 +238,18 @@ pub async fn handle_intercepted_request(
         action: action.clone(),
     });
 
-    // Log request
+    // Log request — use actual redaction count when available
+    let matches_count = match &action {
+        Action::Redacted { count } => *count,
+        _ => scan_result.matches.len(),
+    };
     let log_entry = RequestLog {
         timestamp: Utc::now(),
         host: host.to_string(),
         method: method.clone(),
         path: path.clone(),
         body_size,
-        matches_count: scan_result.matches.len(),
+        matches_count,
         action: action.clone(),
     };
     state.session_log.write().await.push(log_entry);
@@ -286,9 +310,10 @@ async fn forward_request(
         if let Ok(v) = value.to_str() {
             let name_str = name.as_str();
             if name_str != "host"
-                    && name_str != "proxy-connection"
-                    && name_str != "content-length"
-                {
+                && name_str != "proxy-connection"
+                && name_str != "proxy-authorization"
+                && name_str != "content-length"
+            {
                 req_builder = req_builder.header(name_str, v);
             }
         }
@@ -366,12 +391,20 @@ async fn forward_request(
 
                             if !scan_result.is_clean() {
                                 let current_mode = mode.read().await.clone();
-                                let action = match &current_mode {
+
+                                // Apply mode action first so we get actual counts
+                                let action = match current_mode {
+                                    ScanMode::Block => {
+                                        should_block = true;
+                                        Action::Blocked
+                                    }
+                                    ScanMode::Redact => {
+                                        let (redacted, count) =
+                                            redact::redact_json_body(&chunk, &scanner);
+                                        forward_chunk = redacted;
+                                        Action::Redacted { count }
+                                    }
                                     ScanMode::WarnOnly => Action::Warned,
-                                    ScanMode::Redact => Action::Redacted {
-                                        count: scan_result.matches.len(),
-                                    },
-                                    ScanMode::Block => Action::Blocked,
                                 };
                                 let _ = event_tx.send(ProxyEvent::RequestIntercepted {
                                     timestamp: Utc::now(),
@@ -382,20 +415,6 @@ async fn forward_request(
                                     scan_result: scan_result.clone(),
                                     action,
                                 });
-
-                                match current_mode {
-                                    ScanMode::Block => {
-                                        should_block = true;
-                                    }
-                                    ScanMode::Redact => {
-                                        let redacted =
-                                            redact::redact_body(&chunk, &scan_result.matches);
-                                        forward_chunk = Bytes::from(redacted);
-                                    }
-                                    ScanMode::WarnOnly => {
-                                        // Forward unchanged
-                                    }
-                                }
                             }
 
                             // Also feed the parser for structured event tracking
@@ -492,8 +511,8 @@ async fn forward_request(
                         Bytes::from(resp_body.to_vec())
                     }
                     ScanMode::Redact => {
-                        let count = scan_result.matches.len();
-                        let redacted = redact::redact_body(&resp_body, &scan_result.matches);
+                        let (redacted, count) =
+                            redact::redact_json_body(&resp_body, &state.scanner);
                         info!(
                             host = %host,
                             redacted = count,
@@ -508,7 +527,7 @@ async fn forward_request(
                             scan_result,
                             action: Action::Redacted { count },
                         });
-                        Bytes::from(redacted)
+                        redacted
                     }
                     ScanMode::Block => {
                         warn!(

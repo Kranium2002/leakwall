@@ -46,6 +46,36 @@ tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# File watching (Phase 2)
+notify = "6"
+notify-debouncer-full = "0.3"
+walkdir = "2"
+
+# Desktop notifications (Phase 2)
+notify-rust = "4"
+
+# HTML templates (Phase 2)
+tera = "1"
+
+# Plugin architecture (Phase 2)
+async-trait = "0.1"
+futures = "0.3"
+
+# Cross-platform (Phase 2)
+libc = "0.2"
+
+# Benchmarking (Phase 2)
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Constant-time comparison (security)
+subtle = "2"
+
+# File locking
+fs2 = "0.4"
+
+# Semantic versioning
+semver = "1"
+
 # Utilities
 dirs = "5"
 bytes = "1"
