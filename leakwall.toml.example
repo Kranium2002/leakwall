@@ -1,0 +1,25 @@
+# LeakWall configuration file
+# Place at ./leakwall.toml (project-level) or ~/.leakwall/config.toml (global)
+
+# Proxy port for `leakwall run`
+proxy_port = 9090
+
+# Scan mode: "WarnOnly", "Redact", or "Block"
+mode = "Redact"
+
+# Log directory
+# log_dir = "~/.leakwall/logs"
+
+[mcp_scan]
+# Enable MCP server scanning in `leakwall scan`
+enabled = true
+# Connect timeout for MCP servers (seconds)
+connect_timeout_secs = 10
+
+[registry]
+# Enable external registry lookups
+enabled = true
+# AgentAudit API base URL
+agentaudit_url = "https://agentaudit.dev/api"
+# Cache TTL for registry results (hours)
+cache_ttl_hours = 24

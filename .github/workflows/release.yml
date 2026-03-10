@@ -1,0 +1,594 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build matrix for all targets
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            deb: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+            deb: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross (for cross-compilation)
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Install cargo-deb (for .deb packages)
+        if: matrix.deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build release binary
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p leakwall
+          else
+            cargo build --release --target ${{ matrix.target }} -p leakwall
+          fi
+        shell: bash
+
+      - name: Build .deb package
+        if: matrix.deb
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cargo deb -p leakwall --no-build --target ${{ matrix.target }}
+          else
+            cargo deb -p leakwall --no-build --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../leakwall-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz leakwall 
+        shell: bash
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../leakwall-${{ steps.version.outputs.version }}-${{ matrix.target }}.zip leakwall.exe
+        shell: bash
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leakwall-${{ matrix.target }}
+          path: |
+            leakwall-*.tar.gz
+            leakwall-*.zip
+
+      - name: Upload .deb artifact
+        if: matrix.deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: leakwall-deb-${{ matrix.target }}
+          path: target/${{ matrix.target }}/debian/*.deb
+
+  # Create GitHub Release with all artifacts
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          find . -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.deb" \) -exec sha256sum {} \; | sort > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Generate install script (shell)
+        run: |
+          cat > artifacts/install.sh << 'SCRIPT'
+          #!/bin/sh
+          set -eu
+
+          REPO="Kranium2002/leakwall"
+
+          # Detect platform
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+
+          case "${OS}" in
+            linux)  TARGET_OS="unknown-linux-gnu" ;;
+            darwin) TARGET_OS="apple-darwin" ;;
+            *)      echo "Unsupported OS: ${OS}"; exit 1 ;;
+          esac
+
+          case "${ARCH}" in
+            x86_64|amd64)  TARGET_ARCH="x86_64" ;;
+            aarch64|arm64) TARGET_ARCH="aarch64" ;;
+            *)             echo "Unsupported arch: ${ARCH}"; exit 1 ;;
+          esac
+
+          TARGET="${TARGET_ARCH}-${TARGET_OS}"
+
+          # Get latest release tag
+          if [ -z "${VERSION:-}" ]; then
+            VERSION=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+          fi
+
+          URL="https://github.com/${REPO}/releases/download/v${VERSION}/leakwall-${VERSION}-${TARGET}.tar.gz"
+          echo "Downloading leakwall v${VERSION} for ${TARGET}..."
+
+          TMPDIR=$(mktemp -d)
+          curl -sL "${URL}" | tar xz -C "${TMPDIR}"
+
+          INSTALL_DIR="${HOME}/.cargo/bin"
+          mkdir -p "${INSTALL_DIR}"
+          mv "${TMPDIR}/leakwall" "${INSTALL_DIR}/leakwall"
+          chmod +x "${INSTALL_DIR}/leakwall"
+          rm -rf "${TMPDIR}"
+
+          echo "Installed leakwall to ${INSTALL_DIR}/leakwall"
+          echo "Make sure ${INSTALL_DIR} is in your PATH"
+          SCRIPT
+          chmod +x artifacts/install.sh
+
+      - name: Generate install script (PowerShell)
+        run: |
+          cat > artifacts/install.ps1 << 'SCRIPT'
+          $ErrorActionPreference = "Stop"
+          $Repo = "Kranium2002/leakwall"
+
+          if (-not $env:VERSION) {
+              $release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest"
+              $Version = $release.tag_name -replace '^v', ''
+          } else {
+              $Version = $env:VERSION
+          }
+
+          $Target = "x86_64-pc-windows-msvc"
+          $Url = "https://github.com/$Repo/releases/download/v$Version/leakwall-$Version-$Target.zip"
+
+          Write-Host "Downloading leakwall v$Version for Windows..."
+
+          $TmpDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory $_ }
+          $ZipPath = Join-Path $TmpDir "leakwall.zip"
+
+          Invoke-WebRequest -Uri $Url -OutFile $ZipPath
+          Expand-Archive -Path $ZipPath -DestinationPath $TmpDir
+
+          $InstallDir = Join-Path $env:USERPROFILE ".cargo\bin"
+          New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+          Move-Item (Join-Path $TmpDir "leakwall.exe") (Join-Path $InstallDir "leakwall.exe") -Force
+          Remove-Item -Recurse $TmpDir
+
+          Write-Host "Installed leakwall to $InstallDir\leakwall.exe"
+          Write-Host "Make sure $InstallDir is in your PATH"
+          SCRIPT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.deb
+            artifacts/SHA256SUMS.txt
+            artifacts/install.sh
+            artifacts/install.ps1
+
+  # Update apt repository on GitHub Pages
+  apt-repo:
+    name: Update APT Repository
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+        continue-on-error: true
+
+      - name: Initialize gh-pages if needed
+        run: |
+          if [ ! -f "index.html" ]; then
+            git checkout --orphan gh-pages 2>/dev/null || true
+            git rm -rf . 2>/dev/null || true
+            mkdir -p deb/pool deb/dists/stable/main/binary-amd64 deb/dists/stable/main/binary-arm64
+          fi
+
+      - name: Download .deb artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: leakwall-deb-*
+          path: new-debs
+          merge-multiple: true
+
+      - name: Install apt repo tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Copy .deb files to pool
+        run: |
+          find new-debs -name "*.deb" -exec cp {} deb/pool/ \;
+          ls -la deb/pool/
+
+      - name: Generate Packages index
+        run: |
+          cd deb
+          dpkg-scanpackages pool /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -k dists/stable/main/binary-amd64/Packages
+          # Copy for arm64 (dpkg-scanpackages includes all archs)
+          cp dists/stable/main/binary-amd64/Packages dists/stable/main/binary-arm64/Packages
+          cp dists/stable/main/binary-amd64/Packages.gz dists/stable/main/binary-arm64/Packages.gz
+
+      - name: Generate Release file
+        run: |
+          cd deb/dists/stable
+          cat > Release << EOF
+          Origin: LeakWall
+          Label: LeakWall AI Agent Security
+          Suite: stable
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: LeakWall AI agent security platform
+          EOF
+          # Add checksums
+          apt-ftparchive release . >> Release
+
+      - name: Create landing page
+        run: |
+          cat > index.html << 'HTMLPAGE'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>LeakWall - AI Agent Security Platform</title>
+          <style>
+            :root { --bg: #0d1117; --fg: #c9d1d9; --accent: #58a6ff; --green: #3fb950;
+                    --red: #f85149; --yellow: #d29922; --border: #30363d; --code-bg: #161b22; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                   background: var(--bg); color: var(--fg); line-height: 1.6; }
+            .container { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem; }
+            h1 { font-size: 2.5rem; color: #fff; margin-bottom: 0.5rem; }
+            h1 span { color: var(--accent); }
+            .tagline { font-size: 1.2rem; color: #8b949e; margin-bottom: 2rem; }
+            h2 { color: #fff; font-size: 1.5rem; margin: 2.5rem 0 1rem; padding-bottom: 0.3rem;
+                 border-bottom: 1px solid var(--border); }
+            h3 { color: var(--accent); font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+            p { margin-bottom: 1rem; }
+            pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+                  padding: 1rem; overflow-x: auto; font-size: 0.9rem; margin-bottom: 1rem; }
+            code { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; }
+            pre code { color: var(--fg); }
+            .inline-code { background: var(--code-bg); padding: 0.2rem 0.4rem; border-radius: 3px;
+                           font-size: 0.85rem; }
+            a { color: var(--accent); text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px;
+                     font-size: 0.8rem; font-weight: 600; margin-right: 0.3rem; }
+            .badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+            .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+            .badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+            th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+            th { color: #fff; font-weight: 600; }
+            .diagram { color: var(--green); }
+            .features { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+            .feature { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; }
+            .feature h4 { color: #fff; margin-bottom: 0.3rem; }
+            .feature p { color: #8b949e; font-size: 0.9rem; margin: 0; }
+            @media (max-width: 600px) { .features { grid-template-columns: 1fr; } }
+            .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+                      color: #8b949e; font-size: 0.85rem; }
+          </style>
+          </head>
+          <body>
+          <div class="container">
+
+          <h1><span>LeakWall</span></h1>
+          <p class="tagline">AI agent security platform. Protect your coding agents from secret leaks, tool poisoning, and behavioral anomalies.</p>
+
+          <div class="features">
+            <div class="feature">
+              <h4>Secret Redaction</h4>
+              <p>MITM proxy intercepts LLM API calls and strips leaked credentials before they leave your machine.</p>
+            </div>
+            <div class="feature">
+              <h4>MCP Auditing</h4>
+              <p>Scans MCP server configs for tool poisoning, known CVEs, and rug pulls with hash-pin detection.</p>
+            </div>
+            <div class="feature">
+              <h4>Behavioral Analysis</h4>
+              <p>Profiles outbound traffic for volume spikes, new destinations, and high-entropy secret-shaped data.</p>
+            </div>
+            <div class="feature">
+              <h4>Filesystem Monitoring</h4>
+              <p>Watch daemon detects changes to .env files, MCP configs, skill files, and credentials in real-time.</p>
+            </div>
+          </div>
+
+          <h2>Install</h2>
+
+          <h3>Shell (Linux / macOS)</h3>
+          <pre><code>curl -sSL https://kranium2002.github.io/leakwall/install.sh | sh</code></pre>
+
+          <h3>PowerShell (Windows)</h3>
+          <pre><code>irm https://kranium2002.github.io/leakwall/install.ps1 | iex</code></pre>
+
+          <h3>APT (Debian / Ubuntu)</h3>
+          <pre><code>echo "deb [trusted=yes] https://kranium2002.github.io/leakwall/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/leakwall.list
+          sudo apt update
+          sudo apt install leakwall</code></pre>
+
+          <h3>Homebrew (macOS / Linux)</h3>
+          <pre><code>brew tap Kranium2002/leakwall https://github.com/Kranium2002/leakwall.git
+          brew install leakwall</code></pre>
+
+          <h3>Cargo</h3>
+          <pre><code>cargo install leakwall</code></pre>
+
+          <h3>From Source</h3>
+          <pre><code>git clone https://github.com/Kranium2002/leakwall.git
+          cd leakwall
+          cargo install --path crates/leakwall-cli</code></pre>
+
+          <h2>Quick Start</h2>
+
+          <pre><code># Protect any AI agent session (redact mode is default)
+          leakwall run -- claude
+
+          # Block mode — drop requests containing secrets
+          leakwall run -m block -- cursor
+
+          # With TUI dashboard
+          leakwall run -T -- claude
+
+          # Audit MCP servers and credentials
+          leakwall scan
+
+          # Monitor filesystem for changes
+          leakwall watch --daemon
+
+          # Generate HTML report
+          leakwall report --html --open</code></pre>
+
+          <h2>How It Works</h2>
+
+          <pre class="diagram"><code>  Your Agent (Claude, Cursor, Copilot, etc.)
+      |
+      | HTTPS requests via HTTPS_PROXY
+      v
+  +-------------------------------+
+  |         LeakWall Proxy           |
+  |    127.0.0.1:&lt;port&gt;          |
+  |                               |
+  |  1. TLS intercept (MITM)      |
+  |  2. Scan body for secrets     |
+  |  3. Redact / Block / Warn     |
+  |  4. Forward to real API       |
+  +-------------------------------+
+      |
+      v
+  LLM API (Anthropic, OpenAI, Groq, Mistral, ...)</code></pre>
+
+          <h3>Two-Layer Secret Detection</h3>
+          <table>
+            <tr>
+              <th>Layer</th>
+              <th>Method</th>
+              <th>What It Catches</th>
+            </tr>
+            <tr>
+              <td><span class="badge badge-green">Layer 1</span></td>
+              <td>Aho-Corasick fingerprinting</td>
+              <td>Known secrets from .env, cloud creds, env vars — in raw, base64, URL-encoded, and JSON-escaped forms</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-yellow">Layer 2</span></td>
+              <td>Regex pattern matching</td>
+              <td>17 format-based patterns: AWS keys, GitHub PATs, Stripe keys, JWTs, Google API keys, and more</td>
+            </tr>
+          </table>
+
+          <h3>Scan Modes</h3>
+          <table>
+            <tr><th>Mode</th><th>Behavior</th></tr>
+            <tr>
+              <td><span class="badge badge-green">redact</span> (default)</td>
+              <td>Replace secrets with <span class="inline-code">[LEAKWALL:pattern:REDACTED]</span>, forward sanitized request</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-yellow">warn</span></td>
+              <td>Detect and log secrets, forward request unchanged</td>
+            </tr>
+            <tr>
+              <td><span class="badge badge-red">block</span></td>
+              <td>Drop the entire request, return 403</td>
+            </tr>
+          </table>
+
+          <h3>Intercepted APIs</h3>
+          <p>
+            <span class="inline-code">api.anthropic.com</span>
+            <span class="inline-code">api.openai.com</span>
+            <span class="inline-code">api.groq.com</span>
+            <span class="inline-code">api.mistral.ai</span>
+            <span class="inline-code">api.together.xyz</span>
+            <span class="inline-code">api.fireworks.ai</span>
+            <span class="inline-code">generativelanguage.googleapis.com</span>
+            <span class="inline-code">api.cohere.com</span>
+            <span class="inline-code">api.deepseek.com</span>
+          </p>
+          <p>All other HTTPS traffic passes through without inspection.</p>
+
+          <h2>Commands</h2>
+          <table>
+            <tr><th>Command</th><th>Description</th></tr>
+            <tr><td><span class="inline-code">leakwall run</span></td><td>Run an agent with runtime proxy protection</td></tr>
+            <tr><td><span class="inline-code">leakwall scan</span></td><td>Audit MCP servers, skill files, and credentials</td></tr>
+            <tr><td><span class="inline-code">leakwall watch</span></td><td>Filesystem monitoring daemon</td></tr>
+            <tr><td><span class="inline-code">leakwall report</span></td><td>Generate HTML / SARIF / JSON reports</td></tr>
+          </table>
+
+          <h2>Platform Support</h2>
+          <table>
+            <tr><th>Platform</th><th>Architecture</th><th>Install Method</th></tr>
+            <tr><td>Linux</td><td>x86_64, ARM64</td><td>apt, shell script, cargo</td></tr>
+            <tr><td>macOS</td><td>x86_64, Apple Silicon</td><td>Homebrew, shell script, cargo</td></tr>
+            <tr><td>Windows</td><td>x86_64</td><td>PowerShell script, cargo</td></tr>
+          </table>
+
+          <div class="footer">
+            <p>
+              <a href="https://github.com/Kranium2002/leakwall">GitHub</a> &middot;
+              <a href="https://github.com/Kranium2002/leakwall/releases">Releases</a> &middot;
+              Apache-2.0 License
+            </p>
+          </div>
+
+          </div>
+          </body>
+          </html>
+          HTMLPAGE
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update apt repo for ${{ github.ref_name }}" || true
+          git push origin gh-pages
+
+  # Update Homebrew formula in the same repo
+  homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS artifacts for checksums
+        uses: actions/download-artifact@v4
+        with:
+          pattern: leakwall-*apple*
+          path: mac-artifacts
+          merge-multiple: true
+
+      - name: Download Linux artifact for checksums
+        uses: actions/download-artifact@v4
+        with:
+          pattern: leakwall-x86_64-unknown-linux-gnu
+          path: linux-artifacts
+          merge-multiple: true
+
+      - name: Compute checksums and generate formula
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="Kranium2002/leakwall"
+
+          SHA_DARWIN_ARM64=$(sha256sum mac-artifacts/leakwall-${VERSION}-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_DARWIN_X86=$(sha256sum mac-artifacts/leakwall-${VERSION}-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA_LINUX_X86=$(sha256sum linux-artifacts/leakwall-${VERSION}-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+
+          mkdir -p Formula
+          cat > Formula/leakwall.rb << FORMULA
+          class Leakwall < Formula
+            desc "AI agent security platform — protect coding agents from secret leaks and tool poisoning"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
+            license "Apache-2.0"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/leakwall-${VERSION}-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/${REPO}/releases/download/v${VERSION}/leakwall-${VERSION}-x86_64-apple-darwin.tar.gz"
+                sha256 "${SHA_DARWIN_X86}"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/${REPO}/releases/download/v${VERSION}/leakwall-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+              sha256 "${SHA_LINUX_X86}"
+            end
+
+            def install
+              bin.install "leakwall"
+            end
+
+            test do
+              assert_match "leakwall", shell_output("#{bin}/leakwall --version")
+            end
+          end
+          FORMULA
+
+      - name: Commit formula
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/leakwall.rb
+          git commit -m "Update Homebrew formula for v${{ steps.version.outputs.version }}" || true
+          git push origin master

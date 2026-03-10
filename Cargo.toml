@@ -5,8 +5,25 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 rust-version = "1.75"
-license = "MIT"
-repository = "https://github.com/youruser/aegis"
+license = "Apache-2.0"
+repository = "https://github.com/Kranium2002/leakwall"
+homepage = "https://github.com/Kranium2002/leakwall"
+
+# cargo-dist config
+[workspace.metadata.dist]
+cargo-dist-version = "0.27.0"
+ci = "github"
+installers = ["shell", "powershell", "homebrew"]
+# Homebrew formula lives in Formula/leakwall.rb in this repo
+# Users install with: brew tap Kranium2002/leakwall && brew install leakwall
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+install-path = "CARGO_HOME"
 
 [workspace.dependencies]
 # CLI
