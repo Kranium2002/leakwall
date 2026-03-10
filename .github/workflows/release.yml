@@ -408,22 +408,22 @@ jobs:
 
           <h2>How It Works</h2>
 
-          <pre class="diagram"><code>  Your Agent (Claude, Cursor, Copilot, etc.)
-      |
-      | HTTPS requests via HTTPS_PROXY
-      v
-  +-------------------------------+
-  |         LeakWall Proxy           |
-  |    127.0.0.1:&lt;port&gt;          |
-  |                               |
-  |  1. TLS intercept (MITM)      |
-  |  2. Scan body for secrets     |
-  |  3. Redact / Block / Warn     |
-  |  4. Forward to real API       |
-  +-------------------------------+
-      |
-      v
-  LLM API (Anthropic, OpenAI, Groq, Mistral, ...)</code></pre>
+          <pre class="diagram"><code>          Your Agent (Claude, Cursor, Copilot, etc.)
+              &#124;
+              &#124; HTTPS requests via HTTPS_PROXY
+              v
+          +-------------------------------+
+          &#124;         LeakWall Proxy        &#124;
+          &#124;    127.0.0.1:&lt;port&gt;          &#124;
+          &#124;                               &#124;
+          &#124;  1. TLS intercept (MITM)      &#124;
+          &#124;  2. Scan body for secrets     &#124;
+          &#124;  3. Redact / Block / Warn     &#124;
+          &#124;  4. Forward to real API       &#124;
+          +-------------------------------+
+              &#124;
+              v
+          LLM API (Anthropic, OpenAI, Groq, Mistral, ...)</code></pre>
 
           <h3>Two-Layer Secret Detection</h3>
           <table>

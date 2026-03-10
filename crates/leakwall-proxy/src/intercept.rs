@@ -265,7 +265,9 @@ pub async fn handle_intercepted_request(
             });
             Ok(Response::builder()
                 .status(502)
-                .body(full_body(Bytes::from(format!("[LEAKWALL] Proxy error: {e}"))))
+                .body(full_body(Bytes::from(format!(
+                    "[LEAKWALL] Proxy error: {e}"
+                ))))
                 .unwrap_or_else(|_| Response::new(empty_body())))
         }
     }
