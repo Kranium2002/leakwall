@@ -1,0 +1,32 @@
+Origin: LeakWall
+Label: LeakWall AI Agent Security
+Suite: stable
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Description: LeakWall AI agent security platform
+Date: Tue, 10 Mar 2026 18:07:29 +0000
+MD5Sum:
+ 6f849aa3ca4a270f5587f47ad7285d21              213 Release
+ 48c420e5981801fdd5c6e226957b3735              829 main/binary-amd64/Packages
+ b9c96a54cecbe3170c505be8210cdb8f              571 main/binary-amd64/Packages.gz
+ 48c420e5981801fdd5c6e226957b3735              829 main/binary-arm64/Packages
+ b9c96a54cecbe3170c505be8210cdb8f              571 main/binary-arm64/Packages.gz
+SHA1:
+ ae292b701060d5513ec679fd0353e979e559a3ac              213 Release
+ 94eec0880794e8dca66bba5edab444705bd87c3d              829 main/binary-amd64/Packages
+ b61732aed35099ae6394690787423458c555d3f2              571 main/binary-amd64/Packages.gz
+ 94eec0880794e8dca66bba5edab444705bd87c3d              829 main/binary-arm64/Packages
+ b61732aed35099ae6394690787423458c555d3f2              571 main/binary-arm64/Packages.gz
+SHA256:
+ 5a2e77780f4319ceb1ff279979aefbdb5d56eccee33a8e9717e704eed46fabd6              213 Release
+ c144821cb915bd113f40e46731c564bd71b1f514792fe5e83112d0828e8c77de              829 main/binary-amd64/Packages
+ dc2814efcdefdab8ca1352a282bffe17e25a3d44fcec3496c7d3d8a0408277e2              571 main/binary-amd64/Packages.gz
+ c144821cb915bd113f40e46731c564bd71b1f514792fe5e83112d0828e8c77de              829 main/binary-arm64/Packages
+ dc2814efcdefdab8ca1352a282bffe17e25a3d44fcec3496c7d3d8a0408277e2              571 main/binary-arm64/Packages.gz
+SHA512:
+ 2a16fdd97b5d6e68939f73458f80812797353586300c794c7c3f647d00f25980ded4e0e8d0fd5266cb5cfc5eb394a2d4aafb63bb5e5dc8e811c6eef64ccca8fb              213 Release
+ e0e68881b9a55acc9b0ec1b57ea66aecd6347f6ad042b5c36594f6bb15f4e2898175cc42ace555a77bb7136b0459a0a72a2005f0a1beb8a30b86bb372755152a              829 main/binary-amd64/Packages
+ 7e8268a45aba02fef4eb0255e1076942ff11f2254b5379ae63f28e9327932ba1664f7f570bd4b6d964ac0deffbd76658e2130fe75ab99dc397f820aee1b5d6dc              571 main/binary-amd64/Packages.gz
+ e0e68881b9a55acc9b0ec1b57ea66aecd6347f6ad042b5c36594f6bb15f4e2898175cc42ace555a77bb7136b0459a0a72a2005f0a1beb8a30b86bb372755152a              829 main/binary-arm64/Packages
+ 7e8268a45aba02fef4eb0255e1076942ff11f2254b5379ae63f28e9327932ba1664f7f570bd4b6d964ac0deffbd76658e2130fe75ab99dc397f820aee1b5d6dc              571 main/binary-arm64/Packages.gz
