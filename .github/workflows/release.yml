@@ -244,8 +244,8 @@ jobs:
           if [ ! -f "index.html" ]; then
             git checkout --orphan gh-pages 2>/dev/null || true
             git rm -rf . 2>/dev/null || true
-            mkdir -p deb/pool deb/dists/stable/main/binary-amd64 deb/dists/stable/main/binary-arm64
           fi
+          mkdir -p deb/pool deb/dists/stable/main/binary-amd64 deb/dists/stable/main/binary-arm64
 
       - name: Download .deb artifacts
         uses: actions/download-artifact@v4
