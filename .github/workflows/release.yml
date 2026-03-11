@@ -504,6 +504,13 @@ jobs:
           </html>
           HTMLPAGE
 
+      - name: Download install scripts from release
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          curl -sL "https://github.com/Kranium2002/leakwall/releases/download/${TAG}/install.sh" -o install.sh
+          curl -sL "https://github.com/Kranium2002/leakwall/releases/download/${TAG}/install.ps1" -o install.ps1
+          chmod +x install.sh
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
