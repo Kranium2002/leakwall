@@ -1,14 +1,11 @@
-Package: leakwall
-Version: 0.1.0-1
-Architecture: amd64
+Architecture: arm64
 Maintainer: Kranium2002 <kranium2002@users.noreply.github.com>
-Installed-Size: 11159
-Depends: libc6 (>= 2.39)
-Filename: pool/leakwall_0.1.0-1_amd64.deb
-Size: 2963164
-MD5sum: 6bbe1028188cbfbac4889b8a8e74743e
-SHA1: b0389592d1233993c4d785310212b69772a100a7
-SHA256: 906de346e7d180dad10ab3bf37e173b3d1bcdcf8e41af37d96dc3c05ff66a492
+Installed-Size: 10056
+Filename: pool/leakwall_0.1.0-1_arm64.deb
+Size: 2605160
+MD5sum: d5e0218464c3b2d27bb4809d753cb1a9
+SHA1: 25505b1d9c1b98c8c8f2bd086c3011ae6383ab0e
+SHA256: efd5386ae5154512b90e870a8ba347ce380a1046383a81fb6d8ca8b272c2dc8f
 Section: utils
 Priority: optional
 Homepage: https://github.com/Kranium2002/leakwall

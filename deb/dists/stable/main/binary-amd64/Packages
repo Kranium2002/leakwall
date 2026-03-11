@@ -1,14 +1,12 @@
-Package: leakwall
-Version: 0.1.0-1
 Architecture: amd64
 Maintainer: Kranium2002 <kranium2002@users.noreply.github.com>
-Installed-Size: 11159
-Depends: libc6 (>= 2.39)
+Installed-Size: 11158
+Depends: libc6 (>= 2.34)
 Filename: pool/leakwall_0.1.0-1_amd64.deb
-Size: 2963164
-MD5sum: 6bbe1028188cbfbac4889b8a8e74743e
-SHA1: b0389592d1233993c4d785310212b69772a100a7
-SHA256: 906de346e7d180dad10ab3bf37e173b3d1bcdcf8e41af37d96dc3c05ff66a492
+Size: 2966336
+MD5sum: ec47bedb102c8fa89d7ce9ed2865603f
+SHA1: 7d215157a5ae48e0e44f53d6ba98b8e5ee40a028
+SHA256: 94b078e6ea3c5a58ddf17bddae9d8330fdd8bb53532ad2d1e54358899f7b0170
 Section: utils
 Priority: optional
 Homepage: https://github.com/Kranium2002/leakwall
@@ -19,3 +17,5 @@ Description: AI agent security platform — protect coding agents from secret le
  to redact leaked secrets, monitors filesystem changes, and generates
  security reports.
 
+Package: leakwall
+Version: 0.1.0-1
