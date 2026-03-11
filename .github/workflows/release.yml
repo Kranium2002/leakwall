@@ -265,11 +265,10 @@ jobs:
       - name: Generate Packages index
         run: |
           cd deb
-          dpkg-scanpackages pool /dev/null > dists/stable/main/binary-amd64/Packages
-          gzip -k dists/stable/main/binary-amd64/Packages
-          # Copy for arm64 (dpkg-scanpackages includes all archs)
-          cp dists/stable/main/binary-amd64/Packages dists/stable/main/binary-arm64/Packages
-          cp dists/stable/main/binary-amd64/Packages.gz dists/stable/main/binary-arm64/Packages.gz
+          dpkg-scanpackages --multiversion pool /dev/null | grep -A 20 "Architecture: amd64" > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages --multiversion pool /dev/null | grep -A 20 "Architecture: arm64" > dists/stable/main/binary-arm64/Packages
+          gzip -kf dists/stable/main/binary-amd64/Packages
+          gzip -kf dists/stable/main/binary-arm64/Packages
 
       - name: Generate Release file
         run: |
