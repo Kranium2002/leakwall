@@ -7,16 +7,16 @@ class Leakwall < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/Kranium2002/leakwall/releases/download/v0.1.0/leakwall-0.1.0-aarch64-apple-darwin.tar.gz"
-      sha256 "f6240f86666b2fb88043f38c588aa0fcf11e67161e0be6cf98125d846cdd4163"
+      sha256 "682a9bda93cbe5723716865a3a1ab16fd04c3f6bc23ab74b9dd14bbd631d17ee"
     else
       url "https://github.com/Kranium2002/leakwall/releases/download/v0.1.0/leakwall-0.1.0-x86_64-apple-darwin.tar.gz"
-      sha256 "bc53085d0f74455dfee32420ed2fbf758d4c5177ee7ac2a957d40cc52c5bd930"
+      sha256 "e8179d8c9e98bb3cd35498941373d0023c93c5b75a24d94c9ee455059cc4c0d9"
     end
   end
 
   on_linux do
     url "https://github.com/Kranium2002/leakwall/releases/download/v0.1.0/leakwall-0.1.0-x86_64-unknown-linux-gnu.tar.gz"
-    sha256 "388177d236d17f1ba5dedb9522945f05dba392d5e29e370cf07b337276cc8db9"
+    sha256 "b1271c106e6d11837c577af2e5ee20590b96b3a947681783b4a05164d536468c"
   end
 
   def install
