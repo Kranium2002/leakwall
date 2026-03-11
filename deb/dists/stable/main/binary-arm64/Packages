@@ -1,3 +1,5 @@
+Package: leakwall
+Version: 0.1.0-1
 Architecture: arm64
 Maintainer: Kranium2002 <kranium2002@users.noreply.github.com>
 Installed-Size: 10056

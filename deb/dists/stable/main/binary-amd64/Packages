@@ -1,3 +1,5 @@
+Package: leakwall
+Version: 0.1.0-1
 Architecture: amd64
 Maintainer: Kranium2002 <kranium2002@users.noreply.github.com>
 Installed-Size: 11158
@@ -17,5 +19,3 @@ Description: AI agent security platform — protect coding agents from secret le
  to redact leaked secrets, monitors filesystem changes, and generates
  security reports.
 
-Package: leakwall
-Version: 0.1.0-1
