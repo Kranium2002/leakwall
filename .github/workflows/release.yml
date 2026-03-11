@@ -265,8 +265,8 @@ jobs:
       - name: Generate Packages index
         run: |
           cd deb
-          dpkg-scanpackages --multiversion pool /dev/null | grep -A 20 "Architecture: amd64" > dists/stable/main/binary-amd64/Packages
-          dpkg-scanpackages --multiversion pool /dev/null | grep -A 20 "Architecture: arm64" > dists/stable/main/binary-arm64/Packages
+          dpkg-scanpackages --arch amd64 pool /dev/null > dists/stable/main/binary-amd64/Packages
+          dpkg-scanpackages --arch arm64 pool /dev/null > dists/stable/main/binary-arm64/Packages
           gzip -kf dists/stable/main/binary-amd64/Packages
           gzip -kf dists/stable/main/binary-arm64/Packages
 
