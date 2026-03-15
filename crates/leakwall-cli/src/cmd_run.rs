@@ -257,7 +257,7 @@ mod tests {
             session_log: Arc::new(RwLock::new(Vec::new())),
             cert_cache: Arc::new(dashmap::DashMap::new()),
             ca_cert_pem: String::new(),
-            ca_key_pem: zeroize::Zeroizing::new(String::new()),
+            ca_key_pem: String::new().into(),
             proxy_port: 0,
             max_body_size: DEFAULT_MAX_BODY_SIZE,
             http_client: reqwest::Client::new(),
