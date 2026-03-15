@@ -643,9 +643,26 @@ mod tests {
     /// don't race on the process-wide env var.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    /// Clear proxy env vars so reqwest doesn't route test requests through a local proxy
+    /// (e.g., LeakWall's own MITM proxy set in HTTP_PROXY/HTTPS_PROXY), which would
+    /// intercept the wiremock HTTP calls and return unexpected status codes.
+    fn clear_proxy_env() {
+        for var in &[
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ] {
+            std::env::remove_var(var);
+        }
+    }
+
     #[tokio::test]
     async fn test_check_existing_package() {
         let _guard = ENV_LOCK.lock();
+        clear_proxy_env();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -707,6 +724,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_nonexistent_package() {
         let _guard = ENV_LOCK.lock();
+        clear_proxy_env();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
@@ -739,6 +757,7 @@ mod tests {
     #[tokio::test]
     async fn test_findings_parsing() {
         let _guard = ENV_LOCK.lock();
+        clear_proxy_env();
         let mock_server = MockServer::start().await;
 
         Mock::given(method("GET"))
