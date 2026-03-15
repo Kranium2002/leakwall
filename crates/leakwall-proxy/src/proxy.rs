@@ -20,37 +20,29 @@ fn full_body(data: Bytes) -> BoxBody {
         .boxed()
 }
 
-/// Start the MITM proxy on the given port.
+/// Start the MITM proxy.
 ///
-/// If `ready_tx` is provided, it will be sent `Ok(())` once the listener is
-/// bound successfully, or `Err(ProxyError)` if binding fails.  This lets the
-/// caller wait for the proxy to be ready before spawning a child process.
+/// Binds to `state.proxy_port`; use `0` to let the OS assign a free port
+/// atomically.  If `ready_tx` is provided it receives `Ok(port)` with the
+/// actual bound port once the listener is ready, or `Err(ProxyError)` on
+/// failure.
 #[instrument(skip(state, ready_tx))]
 pub async fn start_proxy(
     state: Arc<ProxyState>,
-    ready_tx: Option<oneshot::Sender<Result<(), ProxyError>>>,
+    ready_tx: Option<oneshot::Sender<Result<u16, ProxyError>>>,
 ) -> Result<(), ProxyError> {
     let addr = SocketAddr::from(([127, 0, 0, 1], state.proxy_port));
     let listener = match TcpListener::bind(addr).await {
         Ok(l) => {
             if let Some(tx) = ready_tx {
-                let _ = tx.send(Ok(()));
+                let bound_port = l.local_addr().map(|a| a.port()).unwrap_or(state.proxy_port);
+                let _ = tx.send(Ok(bound_port));
             }
             l
         }
         Err(e) => {
-            let err = if e.kind() == std::io::ErrorKind::AddrInUse {
-                ProxyError::BindError(format!(
-                    "port {} already in use — another leakwall instance may be running. \
-                     Use -p to pick a different port.",
-                    state.proxy_port
-                ))
-            } else {
-                ProxyError::BindError(format!("bind {addr}: {e}"))
-            };
+            let err = ProxyError::BindError(format!("bind {addr}: {e}"));
             if let Some(tx) = ready_tx {
-                // Send a descriptive error back; we construct a second error
-                // for the return because ProxyError is not Clone.
                 let _ = tx.send(Err(ProxyError::BindError(err.to_string())));
             }
             return Err(err);

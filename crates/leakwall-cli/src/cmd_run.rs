@@ -41,7 +41,8 @@ pub async fn run_proxy(
         .build()
         .context("build HTTP client")?;
 
-    // 5. Build proxy state
+    // 5. Build proxy state — port 0 lets the OS pick a free port atomically;
+    // the actual bound port is returned via ready_rx.
     let proxy_token = generate_proxy_token();
     let shared_mode = Arc::new(RwLock::new(mode));
     let state = Arc::new(ProxyState {
@@ -52,7 +53,7 @@ pub async fn run_proxy(
         cert_cache: Arc::new(dashmap::DashMap::new()),
         ca_cert_pem,
         ca_key_pem,
-        proxy_port: port,
+        proxy_port: 0,
         max_body_size: DEFAULT_MAX_BODY_SIZE,
         http_client,
         proxy_token: proxy_token.clone(),
@@ -67,15 +68,21 @@ pub async fn run_proxy(
         }
     });
 
-    // Wait for proxy to bind before spawning child — if it fails, bail out
-    // instead of spawning a child that would connect to a wrong proxy.
-    ready_rx
+    // Wait for proxy to bind; receive the actual port the OS assigned.
+    let actual_port = ready_rx
         .await
         .map_err(|_| anyhow::anyhow!("proxy task exited before signaling readiness"))?
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    if actual_port != port {
+        eprintln!(
+            "[leakwall] port {} in use, using {} instead",
+            port, actual_port
+        );
+    }
+
     // 7. Spawn the agent process
-    let mut child = spawn_agent(command, port, &ca_cert_path, lw_dir, &proxy_token)
+    let mut child = spawn_agent(command, actual_port, &ca_cert_path, lw_dir, &proxy_token)
         .context("failed to spawn agent")?;
 
     let pid = child.id();
@@ -224,4 +231,44 @@ fn build_scanner(lw_dir: &Path) -> Result<SecretScanner> {
     let scanner = SecretScanner::new(known_fingerprints, compiled).context("build scanner")?;
 
     Ok(scanner)
+}
+
+#[cfg(test)]
+mod tests {
+    use leakwall_proxy::proxy::start_proxy;
+    use leakwall_proxy::{generate_proxy_token, ProxyState, ScanMode, DEFAULT_MAX_BODY_SIZE};
+    use leakwall_tui::events::create_event_channel;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    /// Binding to port 0 lets the OS pick a free port atomically.
+    /// Verify that start_proxy signals the actual assigned port via ready_tx.
+    #[tokio::test]
+    async fn start_proxy_signals_os_assigned_port() {
+        let (event_tx, _event_rx) = create_event_channel();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+
+        let state = Arc::new(ProxyState {
+            scanner: Arc::new(
+                leakwall_secrets::scanner::SecretScanner::new(vec![], vec![]).unwrap(),
+            ),
+            mode: Arc::new(RwLock::new(ScanMode::Redact)),
+            event_tx,
+            session_log: Arc::new(RwLock::new(Vec::new())),
+            cert_cache: Arc::new(dashmap::DashMap::new()),
+            ca_cert_pem: String::new(),
+            ca_key_pem: zeroize::Zeroizing::new(String::new()),
+            proxy_port: 0,
+            max_body_size: DEFAULT_MAX_BODY_SIZE,
+            http_client: reqwest::Client::new(),
+            proxy_token: generate_proxy_token(),
+        });
+
+        tokio::spawn(async move {
+            let _ = start_proxy(state, Some(ready_tx)).await;
+        });
+
+        let port = ready_rx.await.unwrap().unwrap();
+        assert!(port > 0, "OS should assign a non-zero port");
+    }
 }
