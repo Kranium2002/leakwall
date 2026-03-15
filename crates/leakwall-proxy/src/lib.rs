@@ -52,6 +52,8 @@ pub enum ProxyEvent {
     AgentStarted {
         pid: u32,
         command: String,
+        #[serde(default)]
+        cwd: Option<String>,
     },
     AgentExited {
         pid: u32,

@@ -9,8 +9,10 @@ description = "Terminal UI dashboard for leakwall proxy"
 
 [dependencies]
 leakwall-proxy = { path = "../leakwall-proxy" }
+leakwall-secrets = { path = "../leakwall-secrets" }
 
 ratatui.workspace = true
+dirs.workspace = true
 crossterm.workspace = true
 tokio.workspace = true
 chrono.workspace = true

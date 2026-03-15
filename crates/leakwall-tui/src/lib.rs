@@ -1,5 +1,6 @@
 pub mod dashboard;
 pub mod events;
+pub mod monitor;
 pub mod report;
 
 use thiserror::Error;

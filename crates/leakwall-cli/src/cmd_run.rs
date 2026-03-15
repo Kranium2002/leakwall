@@ -80,12 +80,16 @@ pub async fn run_proxy(
 
     let pid = child.id();
     let command_str = command.join(" ");
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.display().to_string());
     let start_time = Utc::now();
 
     // Notify TUI of agent start
     let _ = event_tx.send(ProxyEvent::AgentStarted {
         pid,
         command: command_str.clone(),
+        cwd,
     });
 
     // 8. Run TUI dashboard (or headless consumer) and wait for agent in parallel

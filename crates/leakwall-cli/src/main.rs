@@ -1,3 +1,4 @@
+mod cmd_monitor;
 mod cmd_report;
 mod cmd_run;
 mod cmd_scan;
@@ -87,6 +88,9 @@ enum Commands {
         quiet: bool,
     },
 
+    /// Monitor all active sessions in real time (TUI over live log)
+    Monitor,
+
     /// Generate reports (HTML, SARIF, JSON)
     Report {
         /// Generate HTML report
@@ -172,6 +176,11 @@ async fn main() -> Result<()> {
             cmd_watch::run_watch(&lw_dir, daemon, foreground, status, stop, quiet)
                 .await
                 .context("leakwall watch failed")?;
+        }
+        Commands::Monitor => {
+            cmd_monitor::run_monitor(&lw_dir)
+                .await
+                .context("leakwall monitor failed")?;
         }
         Commands::Report { html, open, format } => {
             cmd_report::run_report(&lw_dir, html, open, format.as_deref())

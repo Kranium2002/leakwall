@@ -106,7 +106,7 @@ impl DashboardState {
                     detail,
                 });
             }
-            ProxyEvent::AgentStarted { pid, command } => {
+            ProxyEvent::AgentStarted { pid, command, .. } => {
                 self.pid = Some(pid);
                 self.command = command;
             }
